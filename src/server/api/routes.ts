@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { MatchManager } from '../game/match.js';
+import { getGlobalLeaderboard } from '../db.js';
 import { verifyMoltbookAgent, createTestAgent, checkRateLimit } from './auth.js';
 import {
   JoinRequest,
@@ -203,6 +204,21 @@ export function createRoutes(matchManager: MatchManager): Router {
   router.get('/leaderboard', (req: Request, res: Response) => {
     const leaderboard = matchManager.getLeaderboard();
     res.json(leaderboard);
+  });
+
+  // GET /api/global-leaderboard - No auth required
+  router.get('/global-leaderboard', async (req: Request, res: Response) => {
+    try {
+      const data = await getGlobalLeaderboard();
+      res.json(data);
+    } catch (err) {
+      console.error('[api] /api/global-leaderboard failed:', err);
+      res.status(500).json({
+        success: false,
+        error: 'INTERNAL_ERROR',
+        message: 'Failed to load global leaderboard',
+      });
+    }
   });
 
   return router;

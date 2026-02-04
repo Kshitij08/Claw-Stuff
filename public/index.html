@@ -107,12 +107,32 @@
       font-size: 0.9rem;
     }
 
+    #bot-count {
+      text-align: center;
+      color: #aaa;
+      font-size: 0.85rem;
+      margin-top: 4px;
+    }
+
     #leaderboard {
       flex: 1;
       overflow-y: auto;
     }
 
     #leaderboard h3 {
+      font-size: 0.85rem;
+      color: #888;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+
+    #global-leaderboard {
+      margin-top: 16px;
+      padding-top: 12px;
+      border-top: 1px solid #1a1a3a;
+    }
+
+    #global-leaderboard h3 {
       font-size: 0.85rem;
       color: #888;
       text-transform: uppercase;
@@ -314,10 +334,15 @@
         <span id="match-phase" class="match-phase phase-lobby">Waiting</span>
         <div id="timer">--:--</div>
         <div id="player-count">0 players</div>
+        <div id="bot-count">Tracking bots...</div>
       </div>
       <div id="leaderboard">
-        <h3>Leaderboard</h3>
+        <h3>Current Match</h3>
         <div id="leaderboard-entries"></div>
+        <div id="global-leaderboard">
+          <h3>Global Bots</h3>
+          <div id="global-leaderboard-entries"></div>
+        </div>
       </div>
       <div id="connection-status" class="disconnected">Connecting...</div>
     </div>

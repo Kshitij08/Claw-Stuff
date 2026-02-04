@@ -43,7 +43,9 @@ export async function recordAgentJoin(opts: {
       `
       INSERT INTO match_players (match_id, player_id, agent_name, color)
       VALUES ($1, $2, $3, $4)
-      ON CONFLICT (match_id, player_id) DO NOTHING;
+      ON CONFLICT (match_id, agent_name) DO UPDATE
+      SET player_id = EXCLUDED.player_id,
+          color     = COALESCE(EXCLUDED.color, match_players.color);
     `,
       [opts.matchId, opts.playerId, opts.agentName, opts.color ?? null],
     );
@@ -84,6 +86,71 @@ export async function recordMatchEnd(opts: {
     }
   } catch (err) {
     console.error('[db] recordMatchEnd failed:', err);
+  }
+}
+
+export type GlobalLeaderboardRow = {
+  agentName: string;
+  matches: number;
+  wins: number;
+  winRate: number;
+};
+
+export async function getGlobalLeaderboard(): Promise<{
+  totalBots: number;
+  leaderboard: GlobalLeaderboardRow[];
+}> {
+  if (!pool) {
+    console.warn('[db] DATABASE_URL not set, global leaderboard unavailable');
+    return { totalBots: 0, leaderboard: [] };
+  }
+
+  try {
+    const totalBotsRows = await dbQuery<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM agents;`,
+    );
+    const totalBots = totalBotsRows.length ? parseInt(totalBotsRows[0].count, 10) : 0;
+
+    const rows = await dbQuery<{
+      agent_name: string;
+      matches_played: string;
+      wins: string;
+    }>(
+      `
+      SELECT
+        mp.agent_name,
+        COUNT(DISTINCT mp.match_id)::text AS matches_played,
+        COALESCE(SUM(CASE WHEN m.winner_name = mp.agent_name THEN 1 ELSE 0 END), 0)::text AS wins
+      FROM match_players mp
+      JOIN matches m ON m.id = mp.match_id
+      GROUP BY mp.agent_name
+      HAVING COUNT(DISTINCT mp.match_id) > 0;
+    `,
+    );
+
+    const leaderboard: GlobalLeaderboardRow[] = rows.map((row) => {
+      const matches = parseInt(row.matches_played, 10) || 0;
+      const wins = parseInt(row.wins, 10) || 0;
+      const winRate = matches > 0 ? wins / matches : 0;
+      return {
+        agentName: row.agent_name,
+        matches,
+        wins,
+        winRate,
+      };
+    });
+
+    // Sort by winRate desc, then by matches desc, then name
+    leaderboard.sort((a, b) => {
+      if (b.winRate !== a.winRate) return b.winRate - a.winRate;
+      if (b.matches !== a.matches) return b.matches - a.matches;
+      return a.agentName.localeCompare(b.agentName);
+    });
+
+    return { totalBots, leaderboard };
+  } catch (err) {
+    console.error('[db] getGlobalLeaderboard failed:', err);
+    return { totalBots: 0, leaderboard: [] };
   }
 }
 

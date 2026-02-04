@@ -11,6 +11,8 @@ const matchPhaseEl = document.getElementById('match-phase');
 const timerEl = document.getElementById('timer');
 const playerCountEl = document.getElementById('player-count');
 const leaderboardEl = document.getElementById('leaderboard-entries');
+const botCountEl = document.getElementById('bot-count');
+const globalLeaderboardEl = document.getElementById('global-leaderboard-entries');
 const connectionStatusEl = document.getElementById('connection-status');
 const waitingScreen = document.getElementById('waiting-screen');
 const countdownEl = document.getElementById('countdown');
@@ -180,23 +182,15 @@ function updateLobbyLeaderboard(count) {
   if (gameState && gameState.phase === 'active') return;
 
   if (count === 0) {
-    leaderboardEl.innerHTML = '<div class="leaderboard-entry">Waiting for agents to join...</div>';
+    leaderboardEl.innerHTML = '<div class="leaderboard-entry">Waiting for bots to join...</div>';
     return;
   }
 
-  const entries = [];
-  for (let i = 1; i <= count; i++) {
-    entries.push(`
-      <div class="leaderboard-entry">
-        <div class="rank">${i}</div>
-        <div class="snake-color" style="background: #444"></div>
-        <div class="player-name">Agent #${i}</div>
-        <div class="player-score">0</div>
-        <div class="boost-indicator"></div>
-      </div>
-    `);
-  }
-  leaderboardEl.innerHTML = entries.join('');
+  leaderboardEl.innerHTML = `
+    <div class="leaderboard-entry">
+      <div class="player-name">${count} bot${count === 1 ? '' : 's'} joined this lobby so far</div>
+    </div>
+  `;
 }
 
 function updateUI() {
@@ -442,3 +436,49 @@ function lightenColor(color, percent) {
 
 // Start rendering
 render();
+
+// Global leaderboard polling
+async function fetchGlobalLeaderboard() {
+  try {
+    const res = await fetch('/api/global-leaderboard');
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const data = await res.json();
+
+    const totalBots = data.totalBots ?? 0;
+    const rows = Array.isArray(data.leaderboard) ? data.leaderboard : [];
+
+    if (botCountEl) {
+      botCountEl.textContent =
+        totalBots === 1 ? '1 bot has played so far' : `${totalBots} bots have played so far`;
+    }
+
+    if (globalLeaderboardEl) {
+      if (rows.length === 0) {
+        globalLeaderboardEl.innerHTML = '<div class="leaderboard-entry">No games played yet.</div>';
+        return;
+      }
+
+      globalLeaderboardEl.innerHTML = rows
+        .slice(0, 20)
+        .map((row, index) => {
+          const winRatePct = (row.winRate * 100).toFixed(1);
+          return `
+            <div class="leaderboard-entry">
+              <div class="rank ${index < 3 ? `rank-${index + 1}` : ''}">${index + 1}</div>
+              <div class="player-name">${escapeHtml(row.agentName)}</div>
+              <div class="player-score">${row.wins}/${row.matches} wins (${winRatePct}%)</div>
+            </div>
+          `;
+        })
+        .join('');
+    }
+  } catch (err) {
+    console.error('Failed to fetch global leaderboard:', err);
+  }
+}
+
+// Poll global leaderboard periodically
+fetchGlobalLeaderboard();
+setInterval(fetchGlobalLeaderboard, 15000);

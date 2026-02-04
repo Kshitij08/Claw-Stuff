@@ -170,11 +170,6 @@ function showWinner(result) {
   }
 
   winnerScreen.style.display = 'block';
-
-  // Hide after 10 seconds
-  setTimeout(() => {
-    winnerScreen.style.display = 'none';
-  }, 10000);
 }
 
 function updateLobbyLeaderboard(count) {

@@ -12,6 +12,7 @@ const timerEl = document.getElementById('timer');
 const playerCountEl = document.getElementById('player-count');
 const leaderboardEl = document.getElementById('leaderboard-entries');
 const botCountEl = document.getElementById('bot-count');
+const totalGamesEl = document.getElementById('total-games');
 const globalLeaderboardEl = document.getElementById('global-leaderboard-entries');
 const connectionStatusEl = document.getElementById('connection-status');
 const waitingScreen = document.getElementById('waiting-screen');
@@ -442,11 +443,16 @@ async function fetchGlobalLeaderboard() {
     const data = await res.json();
 
     const totalBots = data.totalBots ?? 0;
+    const totalGames = data.totalGames ?? 0;
     const rows = Array.isArray(data.leaderboard) ? data.leaderboard : [];
 
     if (botCountEl) {
       botCountEl.textContent =
         totalBots === 1 ? '1 bot has played so far' : `${totalBots} bots have played so far`;
+    }
+    if (totalGamesEl) {
+      totalGamesEl.textContent =
+        totalGames === 1 ? '1 game played' : `${totalGames} games played`;
     }
 
     if (globalLeaderboardEl) {

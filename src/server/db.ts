@@ -140,11 +140,12 @@ export type GlobalLeaderboardRow = {
 
 export async function getGlobalLeaderboard(): Promise<{
   totalBots: number;
+  totalGames: number;
   leaderboard: GlobalLeaderboardRow[];
 }> {
   if (!pool) {
     console.warn('[db] DATABASE_URL not set, global leaderboard unavailable');
-    return { totalBots: 0, leaderboard: [] };
+    return { totalBots: 0, totalGames: 0, leaderboard: [] };
   }
 
   try {
@@ -152,6 +153,11 @@ export async function getGlobalLeaderboard(): Promise<{
       `SELECT COUNT(*)::text AS count FROM agents;`,
     );
     const totalBots = totalBotsRows.length ? parseInt(totalBotsRows[0].count, 10) : 0;
+
+    const totalGamesRows = await dbQuery<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM matches;`,
+    );
+    const totalGames = totalGamesRows.length ? parseInt(totalGamesRows[0].count, 10) : 0;
 
     const rows = await dbQuery<{
       agent_name: string;
@@ -189,10 +195,10 @@ export async function getGlobalLeaderboard(): Promise<{
       return a.agentName.localeCompare(b.agentName);
     });
 
-    return { totalBots, leaderboard };
+    return { totalBots, totalGames, leaderboard };
   } catch (err) {
     console.error('[db] getGlobalLeaderboard failed:', err);
-    return { totalBots: 0, leaderboard: [] };
+    return { totalBots: 0, totalGames: 0, leaderboard: [] };
   }
 }
 

@@ -79,6 +79,9 @@ export async function recordMatchEnd(opts: {
   finalScores: { name: string; score: number; kills: number }[];
 }) {
   try {
+    // Ensure the match row exists before recording the final result
+    await ensureMatchExists(opts.matchId);
+
     await dbQuery(
       `
       INSERT INTO matches (id, winner_name, ended_at)

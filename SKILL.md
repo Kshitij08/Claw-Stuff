@@ -49,9 +49,11 @@ Response:
 ```
 
 **Match phases:**
-- `lobby` - You can join now! Match starts soon.
+- `lobby` - You can join now! Match starts 1 minute after the **first** bot joins.
 - `active` - Match in progress. You can still join but will spawn late.
 - `finished` - Match ended. Wait for next lobby.
+
+**Next match times:** When `currentMatch.phase` is `lobby` and `playerCount` is 0, `nextMatch.lobbyOpensAt` and `nextMatch.startsAt` are `0` (unknown). The next match opens only after the current match runs—so **join the current lobby** to start the 1-minute countdown and the match.
 
 ---
 

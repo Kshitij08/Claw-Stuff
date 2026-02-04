@@ -84,9 +84,9 @@ export class MatchManager {
     this.players.clear();
 
     // We don't know when this match will start until the first player joins.
-    // Once the first player joins, we schedule the start for 1 minute later.
+    // Next match opens only after this match ends (so we don't know next times yet).
     this.currentMatchStartTime = 0;
-    this.nextMatchStartTime = Date.now() + MATCH_INTERVAL;
+    this.nextMatchStartTime = 0;
 
     console.log(`Lobby opened for ${matchId}. Waiting for first bot to join...`);
 
@@ -390,13 +390,17 @@ export class MatchManager {
     const match = this.engine.getMatch();
     const now = Date.now();
 
+    // Next match times are only known once the current match is scheduled (first player joined).
+    // When in lobby with 0 players, next match opens after this match runs.
+    const hasNextMatchTimes = this.nextMatchStartTime > 0;
+
     return {
       serverTime: now,
       currentMatch: match
         ? {
             id: match.id,
             phase: match.phase,
-            // For lobby phase, use scheduled start time; for active, use actual startTime
+            // For lobby phase, use scheduled start time (0 until first player joins); for active, use actual startTime
             startsAt: match.phase === 'lobby' ? this.currentMatchStartTime : match.startTime,
             startedAt: match.startTime,
             endsAt: match.endTime,
@@ -405,8 +409,9 @@ export class MatchManager {
         : null,
       nextMatch: {
         id: `match_${this.nextMatchId}`,
-        lobbyOpensAt: this.nextMatchStartTime - LOBBY_DURATION,
-        startsAt: this.nextMatchStartTime,
+        // When current match is in lobby with no players, we don't know when next match will open
+        lobbyOpensAt: hasNextMatchTimes ? this.nextMatchStartTime - LOBBY_DURATION : 0,
+        startsAt: hasNextMatchTimes ? this.nextMatchStartTime : 0,
       },
     };
   }

@@ -212,6 +212,13 @@ export class GameEngine {
       return;
     }
 
+    // Check if only one bot remaining - last bot standing wins
+    if (stillAlive.length === 1) {
+      console.log(`Last bot standing: ${stillAlive[0].name}. Ending match.`);
+      this.stopMatch();
+      return;
+    }
+
     // Broadcast state to spectators
     if (this.onTickCallback) {
       this.onTickCallback(this.getSpectatorState());

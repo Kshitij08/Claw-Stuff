@@ -2,6 +2,9 @@
 const ARENA_WIDTH = 2000;
 const ARENA_HEIGHT = 2000;
 
+// Draw snakes and food larger on screen (no zoom change; arena stays same)
+const VISUAL_SIZE_FACTOR = 1.8;
+
 // Canvas setup
 const canvas = document.getElementById('game-canvas');
 const ctx = canvas.getContext('2d');
@@ -26,13 +29,13 @@ const winnerTableEl = document.getElementById('winner-table');
 let gameState = null;
 let camera = { x: ARENA_WIDTH / 2, y: ARENA_HEIGHT / 2, scale: 1 };
 let targetCamera = { ...camera };
-
 // Resize canvas to fit container
 function resizeCanvas() {
   const container = document.getElementById('game-container');
   const size = Math.min(container.clientWidth - 40, container.clientHeight - 40);
   canvas.width = size;
   canvas.height = size;
+  // Scale so the full arena fits in the canvas (nothing goes off-screen)
   camera.scale = size / Math.max(ARENA_WIDTH, ARENA_HEIGHT);
 }
 
@@ -317,8 +320,8 @@ function drawBorder() {
 
 function drawFood(x, y, value) {
   const screen = worldToScreen(x, y);
-  const radius = (value > 5 ? 5 : 3) * camera.scale;
-  
+  const radius = (value > 5 ? 5 : 3) * camera.scale * VISUAL_SIZE_FACTOR;
+
   // Glow effect
   const gradient = ctx.createRadialGradient(
     screen.x, screen.y, 0,
@@ -326,7 +329,7 @@ function drawFood(x, y, value) {
   );
   gradient.addColorStop(0, value > 5 ? 'rgba(255, 215, 0, 0.8)' : 'rgba(78, 205, 196, 0.8)');
   gradient.addColorStop(1, 'transparent');
-  
+
   ctx.fillStyle = gradient;
   ctx.beginPath();
   ctx.arc(screen.x, screen.y, radius * 2, 0, Math.PI * 2);
@@ -354,7 +357,7 @@ function drawSnake(snake) {
     
     // Size decreases toward tail
     const sizeFactor = 1 - (i / segments.length) * 0.3;
-    const radius = (isHead ? 10 : 8) * sizeFactor * camera.scale;
+    const radius = (isHead ? 10 : 8) * sizeFactor * camera.scale * VISUAL_SIZE_FACTOR;
 
     // Opacity for dead snakes
     ctx.globalAlpha = isAlive ? 1 : 0.3;
@@ -381,7 +384,7 @@ function drawSnake(snake) {
     const head = segments[0];
     const screen = worldToScreen(head[0], head[1]);
     const angle = snake.angle * Math.PI / 180;
-    const headRadius = 10 * camera.scale;
+    const headRadius = 10 * camera.scale * VISUAL_SIZE_FACTOR;
     const eyeOffset = headRadius * 0.5;
     const eyeRadius = headRadius * 0.25;
 
@@ -416,9 +419,9 @@ function drawSnake(snake) {
     const head = segments[0];
     const screen = worldToScreen(head[0], head[1]);
     ctx.fillStyle = isAlive ? '#fff' : '#666';
-    ctx.font = `${12 * camera.scale}px system-ui`;
+    ctx.font = `${12 * camera.scale * VISUAL_SIZE_FACTOR}px system-ui`;
     ctx.textAlign = 'center';
-    ctx.fillText(snake.name, screen.x, screen.y - 20 * camera.scale);
+    ctx.fillText(snake.name, screen.x, screen.y - 20 * camera.scale * VISUAL_SIZE_FACTOR);
   }
 }
 

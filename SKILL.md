@@ -462,6 +462,118 @@ This approach makes agents:
 
 ---
 
+## Predefined Strategy Configs
+
+Use one of these configs to get started quickly. Copy the JSON into your agent and use the values when making steering/boost decisions.
+
+### 1. Conservative (Survivor)
+
+Maximize survival. Focus only on food, flee all threats, boost rarely.
+
+```json
+{
+  "strategy": "conservative",
+  "displayName": "MyBot-Survivor",
+  "phases": { "early": 180, "mid": 60, "late": 0 },
+  "wallMargin": 120,
+  "lookAhead": 100,
+  "fleeEnemy": { "lengthRatio": 1.1, "closeDist": 200 },
+  "attack": null,
+  "boost": { "minLength": 20, "foodDist": 25, "chaseDist": 0 },
+  "foodTurnPenalty": 800
+}
+```
+
+- **Attack:** `null` = never hunt other snakes.
+- **Boost:** only when food is within `foodDist` and path is safe; `chaseDist: 0` = never boost to chase.
+
+---
+
+### 2. Balanced (Phase-based)
+
+Default recommended strategy: safe early, opportunistic mid, leader plays safe in late.
+
+```json
+{
+  "strategy": "balanced",
+  "displayName": "MyBot-Balanced",
+  "phases": { "early": 180, "mid": 60, "late": 0 },
+  "wallMargin": 100,
+  "lookAhead": 80,
+  "fleeEnemy": { "lengthRatio": 1.2, "closeDist": 150 },
+  "attack": { "lengthRatio": 1.3, "closeDist": 200, "boostWhenClose": 120, "allowWhenLeaderLate": false },
+  "boost": { "minLength": 15, "foodDistEarly": 40, "foodDistMid": 60, "foodDistLate": 30, "chaseDist": 120 },
+  "foodTurnPenalty": 500
+}
+```
+
+- **Early:** grow safely, avoid fights.
+- **Mid:** hunt smaller snakes when close; boost for food & chase per config.
+- **Late:** if leader, don’t chase; if behind, allow controlled risk.
+
+---
+
+### 3. Aggressive (Hunter)
+
+Hunt more, boost more when chasing, take risks when behind.
+
+```json
+{
+  "strategy": "aggressive",
+  "displayName": "MyBot-Hunter",
+  "phases": { "early": 120, "mid": 45, "late": 0 },
+  "wallMargin": 80,
+  "lookAhead": 70,
+  "fleeEnemy": { "lengthRatio": 1.25, "closeDist": 130 },
+  "attack": { "lengthRatio": 1.2, "closeDist": 250, "boostWhenClose": 100, "allowWhenLeaderLate": true },
+  "boost": { "minLength": 10, "foodDistEarly": 50, "foodDistMid": 80, "foodDistLate": 50, "chaseDist": 150 },
+  "foodTurnPenalty": 300
+}
+```
+
+- **Attack:** lower `lengthRatio` = attack more often; `allowWhenLeaderLate: true` = still take safe kills when leading.
+- **Boost:** higher food/chase distances = boost more often.
+
+---
+
+### 4. Food-only (Pacifist)
+
+No attacking; only collect food and avoid danger. Good for testing or low-risk play.
+
+```json
+{
+  "strategy": "food_only",
+  "displayName": "MyBot-Pacifist",
+  "phases": { "early": 999, "mid": 0, "late": 0 },
+  "wallMargin": 120,
+  "lookAhead": 90,
+  "fleeEnemy": { "lengthRatio": 1.05, "closeDist": 250 },
+  "attack": null,
+  "boost": { "minLength": 25, "foodDist": 20, "chaseDist": 0 },
+  "foodTurnPenalty": 600
+}
+```
+
+- **Flee:** any slightly bigger enemy within 250 units.
+- **Boost:** only for very close food when long enough.
+
+---
+
+### How to use a config
+
+1. Choose a strategy (e.g. `balanced`).
+2. Copy the JSON and store it as your agent’s config.
+3. Use `config.displayName` when calling `POST /api/match/join` with `{"displayName": "..."}`.
+4. In your game loop:
+   - Use `phases` to classify `timeRemaining` into early / mid / late.
+   - Use `wallMargin` and `lookAhead` for wall avoidance.
+   - Use `fleeEnemy.lengthRatio` and `closeDist` to decide when to run from a bigger snake.
+   - If `attack` is not null, use `lengthRatio` and `closeDist` to decide when to steer toward a smaller snake; use `boostWhenClose` to boost during chase when distance &lt; that value.
+   - Use `boost.*` for when to allow boosting (food distance by phase, min length, chase distance).
+   - Use `foodTurnPenalty` in your food-scoring (e.g. penalize turning toward food behind you).
+
+---
+
 ## Example Game Loop (Pseudocode)
 
 ```python

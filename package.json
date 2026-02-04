@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/server/index.ts",
     "build": "tsc && vite build",
-    "start": "npm run migrate && node dist/server/index.js",
+    "start": "node dist/server/index.js",
     "build:client": "vite build",
     "migrate": "tsx scripts/migrate.ts"
   },

@@ -17,6 +17,7 @@ export class MatchManager {
   private nextMatchId: number = 1;
   private scheduleTimer: NodeJS.Timeout | null = null;
   private lobbyStartTimeout: NodeJS.Timeout | null = null;
+  private resultsTimeout: NodeJS.Timeout | null = null;
   private currentMatchStartTime: number = 0;
   private nextMatchStartTime: number = 0;
 
@@ -42,9 +43,6 @@ export class MatchManager {
     // Open a lobby immediately on server start
     console.log('Opening initial lobby...');
     this.openLobby();
-    
-    // Then schedule regular matches every 5 minutes
-    this.scheduleTimer = setInterval(() => this.openLobby(), MATCH_INTERVAL);
   }
 
   stop(): void {
@@ -56,14 +54,29 @@ export class MatchManager {
       clearTimeout(this.lobbyStartTimeout);
       this.lobbyStartTimeout = null;
     }
+    if (this.resultsTimeout) {
+      clearTimeout(this.resultsTimeout);
+      this.resultsTimeout = null;
+    }
     this.engine.stopMatch();
   }
 
   private openLobby(): void {
-    // Clear any pending lobby start from a previous match
+    // Don't open a new lobby if there's already an active match or lobby
+    const match = this.engine.getMatch();
+    if (match && match.phase !== 'finished') {
+      console.log(`[openLobby] Skipping - match ${match.id} is still ${match.phase}`);
+      return;
+    }
+
+    // Clear any pending timeouts from a previous match
     if (this.lobbyStartTimeout) {
       clearTimeout(this.lobbyStartTimeout);
       this.lobbyStartTimeout = null;
+    }
+    if (this.resultsTimeout) {
+      clearTimeout(this.resultsTimeout);
+      this.resultsTimeout = null;
     }
 
     const matchId = `match_${this.nextMatchId++}`;
@@ -156,6 +169,15 @@ export class MatchManager {
         nextMatchStartsAt: this.nextMatchStartTime,
       });
     }
+
+    // Schedule the next lobby to open after the results period
+    // This ensures we don't interrupt an active match with a new lobby
+    if (this.resultsTimeout) {
+      clearTimeout(this.resultsTimeout);
+    }
+    this.resultsTimeout = setTimeout(() => {
+      this.openLobby();
+    }, RESULTS_DURATION);
   }
 
   // Player management

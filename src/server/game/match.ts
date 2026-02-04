@@ -415,6 +415,10 @@ export class MatchManager {
             startedAt: match.startTime,
             endsAt: match.endTime,
             playerCount: match.snakes.size,
+            // In lobby, include joined bot names for the spectator UI
+            lobbyPlayers: match.phase === 'lobby'
+              ? Array.from(match.snakes.values()).map(s => s.name)
+              : undefined,
           }
         : null,
       nextMatch: {

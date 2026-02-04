@@ -64,9 +64,9 @@ socket.on('status', (status) => {
       showWaitingScreen(status.currentMatch);
       // Update player count while in lobby
       const count = status.currentMatch.playerCount ?? 0;
+      const names = status.currentMatch.lobbyPlayers ?? [];
       playerCountEl.textContent = `${count} joined`;
-      // Show simple lobby leaderboard entries for visual feedback
-      updateLobbyLeaderboard(count);
+      updateLobbyLeaderboard(count, names);
     } else {
       hideWaitingScreen();
     }
@@ -172,7 +172,7 @@ function showWinner(result) {
   winnerScreen.style.display = 'block';
 }
 
-function updateLobbyLeaderboard(count) {
+function updateLobbyLeaderboard(count, names) {
   // Only show lobby leaderboard when we don't have an active game state yet
   if (gameState && gameState.phase === 'active') return;
 
@@ -181,11 +181,17 @@ function updateLobbyLeaderboard(count) {
     return;
   }
 
-  leaderboardEl.innerHTML = `
-    <div class="leaderboard-entry">
-      <div class="player-name">${count} bot${count === 1 ? '' : 's'} joined this lobby so far</div>
-    </div>
-  `;
+  const nameList = Array.isArray(names) && names.length > 0
+    ? names.map((name, i) => `<div class="leaderboard-entry"><div class="player-name">${i + 1}. ${escapeHtml(name)}</div></div>`).join('')
+    : `<div class="leaderboard-entry"><div class="player-name">${count} bot${count === 1 ? '' : 's'} joined</div></div>`;
+
+  leaderboardEl.innerHTML = nameList;
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 function updateUI() {

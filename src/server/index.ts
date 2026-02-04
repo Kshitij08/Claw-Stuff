@@ -86,7 +86,7 @@ matchManager.onStatusChange(() => {
 httpServer.listen(PORT, () => {
   console.log(`
 ╔══════════════════════════════════════════════════════════════╗
-║                          🐍 CLAW.IO 🐍                         ║
+║                          🐍 CLAW IO 🐍                         ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  Server running on http://localhost:${PORT}                      ║
 ║                                                              ║

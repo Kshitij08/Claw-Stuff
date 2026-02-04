@@ -235,7 +235,8 @@ export class MatchManager {
       }
     }
 
-    const wasEmpty = match.snakes.size === 0;
+    const wasFirst = match.snakes.size === 0;
+    const isSecond = match.snakes.size === 1; // after we add this player we'll have 2
 
     // Create player
     const playerId = `player_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -259,9 +260,9 @@ export class MatchManager {
     };
     this.players.set(playerId, player);
 
-    // If this is the first bot to join this lobby, schedule the match
-    // to start 1 minute from now (even if no one else joins).
-    if (wasEmpty) {
+    // Start the 1-minute countdown only when the second bot joins.
+    // Until then, the first bot waits in the lobby.
+    if (isSecond) {
       const now = Date.now();
       this.currentMatchStartTime = now + LOBBY_DURATION;
       this.nextMatchStartTime = this.currentMatchStartTime + MATCH_DURATION + RESULTS_DURATION + LOBBY_DURATION;
@@ -272,10 +273,12 @@ export class MatchManager {
       this.lobbyStartTimeout = setTimeout(() => this.startMatch(), LOBBY_DURATION);
 
       console.log(
-        `First bot joined lobby for ${match.id}. Match will start in ${LOBBY_DURATION / 1000}s (at ${new Date(
+        `Second bot joined lobby for ${match.id}. Match will start in ${LOBBY_DURATION / 1000}s (at ${new Date(
           this.currentMatchStartTime,
         ).toISOString()}).`,
       );
+    } else if (wasFirst) {
+      console.log(`First bot joined lobby for ${match.id}. Waiting for another bot to join before countdown.`);
     }
 
     // Persist agent + match participation (best-effort)
@@ -294,11 +297,16 @@ export class MatchManager {
       this.onStatusChangeCallback();
     }
 
+    const message =
+      this.currentMatchStartTime > 0
+        ? `Joined lobby. Match starts in ${Math.round(timeUntilStart / 1000)} seconds.`
+        : 'Joined lobby. Waiting for another bot to join before countdown starts.';
+
     return {
       success: true,
       playerId,
       matchId: match.id,
-      message: `Joined lobby. Match starts in ${Math.round(timeUntilStart / 1000)} seconds.`,
+      message,
       startsAt: this.currentMatchStartTime,
     };
   }

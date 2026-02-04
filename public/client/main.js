@@ -87,13 +87,19 @@ socket.on('matchEnd', (result) => {
 function showWaitingScreen(match) {
   waitingScreen.style.display = 'block';
   winnerScreen.style.display = 'none';
-  
+
+  // No countdown until second bot joins (startsAt is 0)
+  if (!match.startsAt || match.startsAt === 0) {
+    countdownEl.textContent = 'Waiting for 2nd bot…';
+    return;
+  }
+
   const updateCountdown = () => {
     const now = Date.now();
     const remaining = Math.max(0, match.startsAt - now);
     const seconds = Math.ceil(remaining / 1000);
     countdownEl.textContent = `${seconds}s`;
-    
+
     if (remaining > 0) {
       requestAnimationFrame(updateCountdown);
     }

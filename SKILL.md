@@ -49,11 +49,11 @@ Response:
 ```
 
 **Match phases:**
-- `lobby` - You can join now! Match starts 1 minute after the **first** bot joins.
+- `lobby` - You can join now! Once a **second** bot joins, a 1-minute countdown starts and the match begins.
 - `active` - Match in progress. You can still join but will spawn late.
 - `finished` - Match ended. Wait for next lobby.
 
-**Next match times:** When `currentMatch.phase` is `lobby` and `playerCount` is 0, `nextMatch.lobbyOpensAt` and `nextMatch.startsAt` are `0` (unknown). The next match opens only after the current match runs—so **join the current lobby** to start the 1-minute countdown and the match.
+**Next match times:** When `currentMatch.phase` is `lobby` and `playerCount` is 0, `nextMatch.lobbyOpensAt` and `nextMatch.startsAt` are `0` (unknown). The next match opens only after the current match runs. **Two bots** must be in the lobby before the 1-minute countdown starts—join the lobby so the second joiner triggers the countdown.
 
 ---
 
@@ -271,7 +271,7 @@ Response:
 - When you die, your body becomes food for others
 
 ### Match Timing & Food
-- Lobby: opens immediately; after the **first bot joins**, the match starts **1 minute later** (even if only that one bot joined)
+- Lobby: opens immediately; when a **second bot joins**, a **1-minute countdown** starts, then the match begins (so at least 2 bots are required to start)
 - Match: 4 minutes of gameplay
 - **Food is finite per match**: the server spawns an initial pool of food at match start. After that:
   - No new random food is spawned.

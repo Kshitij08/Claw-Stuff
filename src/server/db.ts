@@ -21,6 +21,27 @@ export async function dbQuery<T = any>(text: string, params: any[] = []): Promis
 // Helper functions for arena-specific writes. These are best-effort and
 // should not break the game loop if the database is unavailable.
 
+export async function getHighestMatchId(): Promise<number> {
+  try {
+    // Extract numeric part from match IDs like "match_1", "match_2", etc.
+    // Using regex substring to get the number after "match_"
+    const rows = await dbQuery<{ max_id: string }>(
+      `
+      SELECT COALESCE(MAX(CAST(SUBSTRING(id FROM 'match_(\\d+)') AS INTEGER)), 0) AS max_id
+      FROM matches
+      WHERE id LIKE 'match_%';
+    `,
+    );
+    if (rows.length > 0 && rows[0].max_id) {
+      return parseInt(rows[0].max_id, 10);
+    }
+    return 0;
+  } catch (err) {
+    console.error('[db] getHighestMatchId failed:', err);
+    return 0;
+  }
+}
+
 export async function ensureMatchExists(matchId: string) {
   try {
     await dbQuery(

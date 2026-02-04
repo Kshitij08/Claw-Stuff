@@ -1,6 +1,6 @@
 import { GameEngine } from './engine.js';
 import { Player, MatchResult, AgentInfo, SpectatorGameState, SpectatorMatchEnd } from '../../shared/types.js';
-import { recordAgentJoin, recordMatchEnd } from '../db.js';
+import { recordAgentJoin, recordMatchEnd, getHighestMatchId } from '../db.js';
 import {
   MATCH_DURATION,
   LOBBY_DURATION,
@@ -39,7 +39,17 @@ export class MatchManager {
   }
 
   // Start the match scheduler
-  start(): void {
+  async start(): Promise<void> {
+    // Initialize nextMatchId from database to persist across server restarts
+    try {
+      const highestId = await getHighestMatchId();
+      this.nextMatchId = highestId + 1;
+      console.log(`[MatchManager] Initialized nextMatchId to ${this.nextMatchId} (highest existing: ${highestId})`);
+    } catch (err) {
+      console.warn('[MatchManager] Failed to initialize nextMatchId from database, starting from 1:', err);
+      this.nextMatchId = 1;
+    }
+
     // Open a lobby immediately on server start
     console.log('Opening initial lobby...');
     this.openLobby();

@@ -97,8 +97,10 @@ httpServer.listen(PORT, () => {
 ╚══════════════════════════════════════════════════════════════╝
   `);
 
-  // Start the match scheduler
-  matchManager.start();
+  // Start the match scheduler (async initialization)
+  matchManager.start().catch((err) => {
+    console.error('Failed to start match manager:', err);
+  });
 });
 
 // Graceful shutdown

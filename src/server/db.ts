@@ -21,6 +21,21 @@ export async function dbQuery<T = any>(text: string, params: any[] = []): Promis
 // Helper functions for arena-specific writes. These are best-effort and
 // should not break the game loop if the database is unavailable.
 
+export async function ensureMatchExists(matchId: string) {
+  try {
+    await dbQuery(
+      `
+      INSERT INTO matches (id, winner_name)
+      VALUES ($1, NULL)
+      ON CONFLICT (id) DO NOTHING;
+    `,
+      [matchId],
+    );
+  } catch (err) {
+    console.error('[db] ensureMatchExists failed:', err);
+  }
+}
+
 export async function recordAgentJoin(opts: {
   agentName: string;
   apiKey: string;
@@ -29,6 +44,9 @@ export async function recordAgentJoin(opts: {
   color?: string;
 }) {
   try {
+    // Ensure the match exists in the database before inserting into match_players
+    await ensureMatchExists(opts.matchId);
+
     await dbQuery(
       `
       INSERT INTO agents (name, api_key)

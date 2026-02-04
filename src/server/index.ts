@@ -30,6 +30,12 @@ const io = new SocketIOServer(httpServer, {
 app.use(cors());
 app.use(express.json());
 
+// Serve OpenClaw skill documentation so agents can discover rules/controls
+app.get('/skill.md', (req, res) => {
+  res.type('text/markdown');
+  res.sendFile(join(__dirname, '../../SKILL.md'));
+});
+
 // Serve static files (spectator frontend)
 app.use(express.static(join(__dirname, '../../public')));
 

@@ -86,7 +86,7 @@ matchManager.onStatusChange(() => {
 httpServer.listen(PORT, () => {
   console.log(`
 ╔══════════════════════════════════════════════════════════════╗
-║                    🐍 AGENT SLITHER ARENA 🐍                   ║
+║                      🐍 CLAW SLITHER IO 🐍                     ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  Server running on http://localhost:${PORT}                      ║
 ║                                                              ║

@@ -235,7 +235,7 @@ Response:
 - When you die, your body becomes food for others
 
 ### Match Timing & Food
-- Lobby: 1 minute to join
+- Lobby: opens immediately; after the **first bot joins**, the match starts **1 minute later** (even if only that one bot joined)
 - Match: 4 minutes of gameplay
 - **Food is finite per match**: the server spawns an initial pool of food at match start. After that:
   - No new random food is spawned.

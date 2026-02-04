@@ -16,6 +16,7 @@ export class MatchManager {
   private allTimeStats: Map<string, { wins: number; totalScore: number }> = new Map();
   private nextMatchId: number = 1;
   private scheduleTimer: NodeJS.Timeout | null = null;
+  private lobbyStartTimeout: NodeJS.Timeout | null = null;
   private currentMatchStartTime: number = 0;
   private nextMatchStartTime: number = 0;
 
@@ -51,18 +52,30 @@ export class MatchManager {
       clearInterval(this.scheduleTimer);
       this.scheduleTimer = null;
     }
+    if (this.lobbyStartTimeout) {
+      clearTimeout(this.lobbyStartTimeout);
+      this.lobbyStartTimeout = null;
+    }
     this.engine.stopMatch();
   }
 
   private openLobby(): void {
+    // Clear any pending lobby start from a previous match
+    if (this.lobbyStartTimeout) {
+      clearTimeout(this.lobbyStartTimeout);
+      this.lobbyStartTimeout = null;
+    }
+
     const matchId = `match_${this.nextMatchId++}`;
     this.engine.createMatch(matchId);
     this.players.clear();
 
-    this.currentMatchStartTime = Date.now() + LOBBY_DURATION;
-    this.nextMatchStartTime = this.currentMatchStartTime + MATCH_DURATION + RESULTS_DURATION + LOBBY_DURATION;
+    // We don't know when this match will start until the first player joins.
+    // Once the first player joins, we schedule the start for 1 minute later.
+    this.currentMatchStartTime = 0;
+    this.nextMatchStartTime = Date.now() + MATCH_INTERVAL;
 
-    console.log(`Lobby opened for ${matchId}. Match starts in ${LOBBY_DURATION / 1000}s`);
+    console.log(`Lobby opened for ${matchId}. Waiting for first bot to join...`);
 
     if (this.onLobbyOpenCallback) {
       this.onLobbyOpenCallback(matchId, this.currentMatchStartTime);
@@ -72,18 +85,12 @@ export class MatchManager {
       this.onStatusChangeCallback();
     }
 
-    // Start match after lobby duration
-    setTimeout(() => this.startMatch(), LOBBY_DURATION);
+    // NOTE: Match start will be scheduled when the first player joins.
   }
 
   private startMatch(): void {
     const match = this.engine.getMatch();
     if (!match) return;
-
-    if (match.snakes.size === 0) {
-      console.log('No players joined. Skipping match.');
-      return;
-    }
 
     console.log(`Starting match ${match.id} with ${match.snakes.size} players`);
     this.engine.startMatch(MATCH_DURATION);
@@ -196,6 +203,8 @@ export class MatchManager {
       }
     }
 
+    const wasEmpty = match.snakes.size === 0;
+
     // Create player
     const playerId = `player_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const name = displayName || agentInfo.name;
@@ -217,6 +226,25 @@ export class MatchManager {
       actionCount: 0,
     };
     this.players.set(playerId, player);
+
+    // If this is the first bot to join this lobby, schedule the match
+    // to start 1 minute from now (even if no one else joins).
+    if (wasEmpty) {
+      const now = Date.now();
+      this.currentMatchStartTime = now + LOBBY_DURATION;
+      this.nextMatchStartTime = this.currentMatchStartTime + MATCH_DURATION + RESULTS_DURATION + LOBBY_DURATION;
+
+      if (this.lobbyStartTimeout) {
+        clearTimeout(this.lobbyStartTimeout);
+      }
+      this.lobbyStartTimeout = setTimeout(() => this.startMatch(), LOBBY_DURATION);
+
+      console.log(
+        `First bot joined lobby for ${match.id}. Match will start in ${LOBBY_DURATION / 1000}s (at ${new Date(
+          this.currentMatchStartTime,
+        ).toISOString()}).`,
+      );
+    }
 
     // Persist agent + match participation (best-effort)
     recordAgentJoin({

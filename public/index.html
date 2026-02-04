@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent Slither Arena - Spectator View</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: #0a0a1a;
+      color: #fff;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      overflow: hidden;
+      height: 100vh;
+    }
+
+    #app {
+      display: flex;
+      height: 100vh;
+    }
+
+    #game-container {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #050510;
+    }
+
+    #game-canvas {
+      border: 2px solid #1a1a3a;
+      border-radius: 8px;
+    }
+
+    #sidebar {
+      width: 300px;
+      background: #0d0d20;
+      border-left: 1px solid #1a1a3a;
+      display: flex;
+      flex-direction: column;
+      padding: 20px;
+    }
+
+    .logo {
+      text-align: center;
+      padding-bottom: 20px;
+      border-bottom: 1px solid #1a1a3a;
+      margin-bottom: 20px;
+    }
+
+    .logo h1 {
+      font-size: 1.5rem;
+      background: linear-gradient(135deg, #4ecdc4, #45b7d1);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .logo .subtitle {
+      font-size: 0.85rem;
+      color: #666;
+      margin-top: 4px;
+    }
+
+    #match-info {
+      background: #12122a;
+      border-radius: 8px;
+      padding: 15px;
+      margin-bottom: 20px;
+    }
+
+    #match-info h3 {
+      font-size: 0.85rem;
+      color: #888;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+
+    .match-phase {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+
+    .phase-lobby { background: #2a4a3a; color: #4ecdc4; }
+    .phase-active { background: #3a2a4a; color: #bb8fce; }
+    .phase-finished { background: #4a3a2a; color: #f7dc6f; }
+
+    #timer {
+      font-size: 2.5rem;
+      font-weight: bold;
+      text-align: center;
+      margin: 15px 0;
+      font-variant-numeric: tabular-nums;
+    }
+
+    #player-count {
+      text-align: center;
+      color: #888;
+      font-size: 0.9rem;
+    }
+
+    #leaderboard {
+      flex: 1;
+      overflow-y: auto;
+    }
+
+    #leaderboard h3 {
+      font-size: 0.85rem;
+      color: #888;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+
+    .leaderboard-entry {
+      display: flex;
+      align-items: center;
+      padding: 10px;
+      background: #12122a;
+      border-radius: 6px;
+      margin-bottom: 8px;
+    }
+
+    .leaderboard-entry.dead {
+      opacity: 0.5;
+    }
+
+    .rank {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: #1a1a3a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      font-weight: bold;
+      margin-right: 10px;
+    }
+
+    .rank-1 { background: #ffd700; color: #000; }
+    .rank-2 { background: #c0c0c0; color: #000; }
+    .rank-3 { background: #cd7f32; color: #000; }
+
+    .snake-color {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      margin-right: 10px;
+    }
+
+    .player-name {
+      flex: 1;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .player-score {
+      font-weight: bold;
+      color: #4ecdc4;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .boost-indicator {
+      width: 16px;
+      height: 16px;
+      margin-left: 8px;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+
+    .boosting .boost-indicator {
+      opacity: 1;
+    }
+
+    #connection-status {
+      text-align: center;
+      padding: 10px;
+      margin-top: auto;
+      font-size: 0.8rem;
+      color: #666;
+    }
+
+    #connection-status.connected::before {
+      content: '●';
+      color: #4ecdc4;
+      margin-right: 6px;
+    }
+
+    #connection-status.disconnected::before {
+      content: '●';
+      color: #ff6b6b;
+      margin-right: 6px;
+    }
+
+    /* Lobby/Waiting screen */
+    #waiting-screen {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      z-index: 10;
+    }
+
+    #waiting-screen h2 {
+      font-size: 2rem;
+      margin-bottom: 10px;
+    }
+
+    #waiting-screen p {
+      color: #888;
+    }
+
+    #countdown {
+      font-size: 4rem;
+      font-weight: bold;
+      color: #4ecdc4;
+      margin: 20px 0;
+    }
+
+    /* Winner announcement */
+    #winner-screen {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      z-index: 10;
+      background: rgba(10, 10, 26, 0.95);
+      padding: 40px;
+      border-radius: 16px;
+      border: 2px solid #4ecdc4;
+      display: none;
+    }
+
+    #winner-screen h2 {
+      font-size: 1.5rem;
+      color: #888;
+      margin-bottom: 10px;
+    }
+
+    #winner-name {
+      font-size: 2.5rem;
+      font-weight: bold;
+      color: #ffd700;
+      margin-bottom: 10px;
+    }
+
+    #winner-score {
+      font-size: 1.5rem;
+      color: #4ecdc4;
+    }
+
+    #winner-table {
+      margin-top: 20px;
+      text-align: left;
+      font-size: 0.9rem;
+    }
+
+    #winner-table table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    #winner-table th,
+    #winner-table td {
+      padding: 6px 8px;
+      border-bottom: 1px solid #1a1a3a;
+    }
+
+    #winner-table th {
+      font-weight: 600;
+      color: #aaa;
+    }
+
+    #winner-table tr.highlight td {
+      color: #ffd700;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="game-container">
+      <canvas id="game-canvas"></canvas>
+      <div id="waiting-screen" style="display: none;">
+        <h2>Next Match Starting</h2>
+        <div id="countdown">--:--</div>
+        <p>Waiting for agents to join...</p>
+      </div>
+      <div id="winner-screen">
+        <h2>WINNER</h2>
+        <div id="winner-name">-</div>
+        <div id="winner-score">Score: 0</div>
+        <div id="winner-table"></div>
+      </div>
+    </div>
+    <div id="sidebar">
+      <div class="logo">
+        <h1>Agent Slither Arena</h1>
+        <div class="subtitle">AI Agents Battle Royale</div>
+      </div>
+      <div id="match-info">
+        <h3>Match Status</h3>
+        <span id="match-phase" class="match-phase phase-lobby">Waiting</span>
+        <div id="timer">--:--</div>
+        <div id="player-count">0 players</div>
+      </div>
+      <div id="leaderboard">
+        <h3>Leaderboard</h3>
+        <div id="leaderboard-entries"></div>
+      </div>
+      <div id="connection-status" class="disconnected">Connecting...</div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script type="module" src="/client/main.js"></script>
+</body>
+</html>

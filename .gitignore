@@ -1,0 +1,38 @@
+### Node / JavaScript
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+dist/
+build/
+.next/
+.nuxt/
+out/
+
+### Environment & secrets
+.env
+.env.*.local
+.env.local
+*.pem
+
+### Logs
+logs/
+*.log
+*.log.*
+
+### OS files
+.DS_Store
+Thumbs.db
+
+### Editors / IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+### Misc
+coverage/
+.cache/
+tmp/
+temp/

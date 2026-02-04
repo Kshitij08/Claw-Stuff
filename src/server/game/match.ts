@@ -1,0 +1,396 @@
+import { GameEngine } from './engine.js';
+import { Player, MatchResult, AgentInfo, SpectatorGameState, SpectatorMatchEnd } from '../../shared/types.js';
+import { recordAgentJoin, recordMatchEnd } from '../db.js';
+import {
+  MATCH_DURATION,
+  LOBBY_DURATION,
+  RESULTS_DURATION,
+  MATCH_INTERVAL,
+  MAX_PLAYERS,
+} from '../../shared/constants.js';
+
+export class MatchManager {
+  private engine: GameEngine;
+  private players: Map<string, Player> = new Map();
+  private matchHistory: MatchResult[] = [];
+  private allTimeStats: Map<string, { wins: number; totalScore: number }> = new Map();
+  private nextMatchId: number = 1;
+  private scheduleTimer: NodeJS.Timeout | null = null;
+  private currentMatchStartTime: number = 0;
+  private nextMatchStartTime: number = 0;
+
+  private onStateUpdateCallback: ((state: SpectatorGameState) => void) | null = null;
+  private onMatchEndCallback: ((result: SpectatorMatchEnd) => void) | null = null;
+  private onLobbyOpenCallback: ((matchId: string, startsAt: number) => void) | null = null;
+  private onStatusChangeCallback: (() => void) | null = null;
+
+  constructor() {
+    this.engine = new GameEngine();
+    this.engine.onTick((state) => {
+      if (this.onStateUpdateCallback) {
+        this.onStateUpdateCallback(state);
+      }
+    });
+    this.engine.onMatchEnd((match) => {
+      this.handleMatchEnd();
+    });
+  }
+
+  // Start the match scheduler
+  start(): void {
+    // Open a lobby immediately on server start
+    console.log('Opening initial lobby...');
+    this.openLobby();
+    
+    // Then schedule regular matches every 5 minutes
+    this.scheduleTimer = setInterval(() => this.openLobby(), MATCH_INTERVAL);
+  }
+
+  stop(): void {
+    if (this.scheduleTimer) {
+      clearInterval(this.scheduleTimer);
+      this.scheduleTimer = null;
+    }
+    this.engine.stopMatch();
+  }
+
+  private openLobby(): void {
+    const matchId = `match_${this.nextMatchId++}`;
+    this.engine.createMatch(matchId);
+    this.players.clear();
+
+    this.currentMatchStartTime = Date.now() + LOBBY_DURATION;
+    this.nextMatchStartTime = this.currentMatchStartTime + MATCH_DURATION + RESULTS_DURATION + LOBBY_DURATION;
+
+    console.log(`Lobby opened for ${matchId}. Match starts in ${LOBBY_DURATION / 1000}s`);
+
+    if (this.onLobbyOpenCallback) {
+      this.onLobbyOpenCallback(matchId, this.currentMatchStartTime);
+    }
+
+    if (this.onStatusChangeCallback) {
+      this.onStatusChangeCallback();
+    }
+
+    // Start match after lobby duration
+    setTimeout(() => this.startMatch(), LOBBY_DURATION);
+  }
+
+  private startMatch(): void {
+    const match = this.engine.getMatch();
+    if (!match) return;
+
+    if (match.snakes.size === 0) {
+      console.log('No players joined. Skipping match.');
+      return;
+    }
+
+    console.log(`Starting match ${match.id} with ${match.snakes.size} players`);
+    this.engine.startMatch(MATCH_DURATION);
+  }
+
+  private handleMatchEnd(): void {
+    const match = this.engine.getMatch();
+    if (!match) return;
+
+    // Calculate final scores
+    const finalScores = Array.from(match.snakes.values())
+      .map(s => ({ name: s.name, score: s.score, kills: s.kills ?? 0 }))
+      .sort((a, b) => b.score - a.score);
+
+    const winner = finalScores.length > 0 ? finalScores[0] : null;
+
+    // Update all-time stats
+    if (winner) {
+      const stats = this.allTimeStats.get(winner.name) || { wins: 0, totalScore: 0 };
+      stats.wins++;
+      stats.totalScore += winner.score;
+      this.allTimeStats.set(winner.name, stats);
+    }
+
+    for (const snake of match.snakes.values()) {
+      if (snake.name !== winner?.name) {
+        const stats = this.allTimeStats.get(snake.name) || { wins: 0, totalScore: 0 };
+        stats.totalScore += snake.score;
+        this.allTimeStats.set(snake.name, stats);
+      }
+    }
+
+    // Record match result
+    const endedAt = Date.now();
+    const result: MatchResult = {
+      matchId: match.id,
+      endedAt,
+      winner,
+      playerCount: match.snakes.size,
+      finalScores,
+    };
+    this.matchHistory.unshift(result);
+    if (this.matchHistory.length > 50) {
+      this.matchHistory.pop();
+    }
+
+    console.log(`Match ${match.id} ended. Winner: ${winner?.name || 'None'}`);
+
+    // Persist to database (best-effort)
+    recordMatchEnd({
+      matchId: match.id,
+      winnerName: winner?.name ?? null,
+      endedAt,
+      finalScores,
+    }).catch(() => {});
+
+    // Notify spectators
+    if (this.onMatchEndCallback) {
+      this.onMatchEndCallback({
+        matchId: match.id,
+        winner,
+        finalScores,
+        nextMatchStartsAt: this.nextMatchStartTime,
+      });
+    }
+  }
+
+  // Player management
+  joinMatch(apiKey: string, agentInfo: AgentInfo, displayName?: string, color?: string): {
+    success: boolean;
+    playerId?: string;
+    matchId?: string;
+    message: string;
+    startsAt?: number;
+    error?: string;
+  } {
+    const match = this.engine.getMatch();
+    if (!match) {
+      return {
+        success: false,
+        message: 'No active match lobby',
+        error: 'NO_LOBBY',
+      };
+    }
+
+    if (match.phase !== 'lobby') {
+      return {
+        success: false,
+        message: 'Match already in progress. Wait for next match.',
+        error: 'MATCH_IN_PROGRESS',
+      };
+    }
+
+    if (match.snakes.size >= MAX_PLAYERS) {
+      return {
+        success: false,
+        message: `Match lobby is full (${MAX_PLAYERS}/${MAX_PLAYERS} players)`,
+        error: 'LOBBY_FULL',
+      };
+    }
+
+    // Check if already joined
+    for (const player of this.players.values()) {
+      if (player.apiKey === apiKey) {
+        return {
+          success: false,
+          message: 'You have already joined this match',
+          error: 'ALREADY_JOINED',
+        };
+      }
+    }
+
+    // Create player
+    const playerId = `player_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const name = displayName || agentInfo.name;
+
+    const snake = this.engine.addPlayer(playerId, name, color);
+    if (!snake) {
+      return {
+        success: false,
+        message: 'Failed to join match',
+        error: 'JOIN_FAILED',
+      };
+    }
+
+    const player: Player = {
+      id: playerId,
+      agentInfo,
+      apiKey,
+      lastActionTime: 0,
+      actionCount: 0,
+    };
+    this.players.set(playerId, player);
+
+    // Persist agent + match participation (best-effort)
+    recordAgentJoin({
+      agentName: agentInfo.name,
+      apiKey,
+      playerId,
+      matchId: match.id,
+      color,
+    }).catch(() => {});
+
+    const timeUntilStart = Math.max(0, this.currentMatchStartTime - Date.now());
+
+    // Notify listeners (e.g. WebSocket spectators) that status changed (playerCount)
+    if (this.onStatusChangeCallback) {
+      this.onStatusChangeCallback();
+    }
+
+    return {
+      success: true,
+      playerId,
+      matchId: match.id,
+      message: `Joined lobby. Match starts in ${Math.round(timeUntilStart / 1000)} seconds.`,
+      startsAt: this.currentMatchStartTime,
+    };
+  }
+
+  getPlayerByApiKey(apiKey: string): Player | undefined {
+    for (const player of this.players.values()) {
+      if (player.apiKey === apiKey) {
+        return player;
+      }
+    }
+    return undefined;
+  }
+
+  // Game actions
+  performAction(
+    playerId: string,
+    action: 'steer' | 'boost',
+    angle?: number,
+    angleDelta?: number,
+    boost?: boolean,
+    active?: boolean
+  ): {
+    success: boolean;
+    tick?: number;
+    newAngle?: number;
+    boosting?: boolean;
+    speed?: number;
+    length?: number;
+    error?: string;
+    message?: string;
+  } {
+    const match = this.engine.getMatch();
+    if (!match || match.phase !== 'active') {
+      return {
+        success: false,
+        error: 'NO_ACTIVE_MATCH',
+        message: 'No active match',
+      };
+    }
+
+    const snake = this.engine.getPlayerState(playerId);
+    if (!snake) {
+      return {
+        success: false,
+        error: 'NOT_IN_MATCH',
+        message: 'You are not in an active match',
+      };
+    }
+
+    if (!snake.alive) {
+      return {
+        success: false,
+        error: 'DEAD',
+        message: 'Your snake is dead. Wait for next match.',
+      };
+    }
+
+    // Handle steering
+    if (action === 'steer' || angle !== undefined || angleDelta !== undefined) {
+      this.engine.steerPlayer(playerId, angle, angleDelta);
+    }
+
+    // Handle boost
+    if (action === 'boost' || boost !== undefined) {
+      const shouldBoost = action === 'boost' ? (active ?? true) : (boost ?? false);
+      const result = this.engine.setPlayerBoost(playerId, shouldBoost);
+      if (!result.success && shouldBoost) {
+        return {
+          success: false,
+          error: 'TOO_SHORT',
+          message: `Minimum length 5 required to boost. Current length: ${snake.segments.length}`,
+        };
+      }
+    }
+
+    const updatedSnake = this.engine.getPlayerState(playerId)!;
+    return {
+      success: true,
+      tick: match.tick,
+      newAngle: updatedSnake.angle,
+      boosting: updatedSnake.boosting,
+      speed: updatedSnake.speed,
+      length: updatedSnake.segments.length,
+    };
+  }
+
+  // State getters
+  getMatchState() {
+    return this.engine.getMatch();
+  }
+
+  getSpectatorState() {
+    const match = this.engine.getMatch();
+    if (!match) return null;
+    return this.engine.getSpectatorState();
+  }
+
+  getStatus() {
+    const match = this.engine.getMatch();
+    const now = Date.now();
+
+    return {
+      serverTime: now,
+      currentMatch: match
+        ? {
+            id: match.id,
+            phase: match.phase,
+            // For lobby phase, use scheduled start time; for active, use actual startTime
+            startsAt: match.phase === 'lobby' ? this.currentMatchStartTime : match.startTime,
+            startedAt: match.startTime,
+            endsAt: match.endTime,
+            playerCount: match.snakes.size,
+          }
+        : null,
+      nextMatch: {
+        id: `match_${this.nextMatchId}`,
+        lobbyOpensAt: this.nextMatchStartTime - LOBBY_DURATION,
+        startsAt: this.nextMatchStartTime,
+      },
+    };
+  }
+
+  getLeaderboard() {
+    const allTime = Array.from(this.allTimeStats.entries())
+      .map(([name, stats]) => ({ name, ...stats }))
+      .sort((a, b) => b.wins - a.wins || b.totalScore - a.totalScore)
+      .slice(0, 20);
+
+    const recentMatches = this.matchHistory.slice(0, 10).map(m => ({
+      matchId: m.matchId,
+      endedAt: m.endedAt,
+      winner: m.winner,
+      playerCount: m.playerCount,
+    }));
+
+    return { allTime, recentMatches };
+  }
+
+  // Event callbacks
+  onStateUpdate(callback: (state: SpectatorGameState) => void): void {
+    this.onStateUpdateCallback = callback;
+  }
+
+  onMatchEndEvent(callback: (result: SpectatorMatchEnd) => void): void {
+    this.onMatchEndCallback = callback;
+  }
+
+  onLobbyOpen(callback: (matchId: string, startsAt: number) => void): void {
+    this.onLobbyOpenCallback = callback;
+  }
+
+  onStatusChange(callback: () => void): void {
+    this.onStatusChangeCallback = callback;
+  }
+}

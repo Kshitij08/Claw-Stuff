@@ -6,6 +6,8 @@ import {
   BOOST_LENGTH_LOSS_INTERVAL,
   KILL_BONUS_PERCENTAGE,
   DROPPED_FOOD_VALUE,
+  NORMAL_SPEED,
+  BOOST_SPEED,
 } from '../../shared/constants.js';
 import {
   createSnake,
@@ -192,14 +194,35 @@ export class GameEngine {
       for (let j = i + 1; j < aliveSnakes.length; j++) {
         const snake1 = aliveSnakes[i];
         const snake2 = aliveSnakes[j];
+        // The list is a snapshot; snakes may have died earlier in this loop.
+        if (!snake1.alive || !snake2.alive) continue;
+
         if (checkHeadCollision(getSnakeHead(snake1), getSnakeHead(snake2))) {
-          killSnake(snake1, snake2.id, this.match.tick);
-          killSnake(snake2, snake1.id, this.match.tick);
-          this.dropSnakeAsFood(snake1);
-          this.dropSnakeAsFood(snake2);
-          // Both get a kill credit for head-on collision
-          snake1.kills = (snake1.kills ?? 0) + 1;
-          snake2.kills = (snake2.kills ?? 0) + 1;
+          const len1 = snake1.segments.length;
+          const len2 = snake2.segments.length;
+
+          if (len1 === len2) {
+            // Tie: keep existing behavior (both die)
+            killSnake(snake1, snake2.id, this.match.tick);
+            killSnake(snake2, snake1.id, this.match.tick);
+            this.dropSnakeAsFood(snake1);
+            this.dropSnakeAsFood(snake2);
+            // Both get a kill credit for head-on collision
+            snake1.kills = (snake1.kills ?? 0) + 1;
+            snake2.kills = (snake2.kills ?? 0) + 1;
+          } else {
+            // Bigger snake survives
+            const winner = len1 > len2 ? snake1 : snake2;
+            const loser = winner === snake1 ? snake2 : snake1;
+
+            killSnake(loser, winner.id, this.match.tick);
+            this.dropSnakeAsFood(loser);
+
+            // Award kill credit + bonus
+            const bonus = Math.floor(loser.score * KILL_BONUS_PERCENTAGE);
+            winner.score += bonus;
+            winner.kills = (winner.kills ?? 0) + 1;
+          }
         }
       }
     }
@@ -328,7 +351,7 @@ export class GameEngine {
     }
 
     snake.boosting = boosting;
-    snake.speed = boosting ? 10 : 5;
+    snake.speed = boosting ? BOOST_SPEED : NORMAL_SPEED;
     if (boosting) {
       snake.lastBoostLoss = Date.now();
     }

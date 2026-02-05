@@ -4,9 +4,9 @@ export const ARENA_HEIGHT = 2000;
 
 // Snake settings
 export const INITIAL_SNAKE_LENGTH = 10;
-export const SNAKE_SEGMENT_SIZE = 10; // Visual size of each segment
-export const NORMAL_SPEED = 5; // Units per tick
-export const BOOST_SPEED = 10; // Units per tick (2x normal)
+export const SNAKE_SEGMENT_SIZE = 21; // Spacing baseline between segments (world units)
+export const NORMAL_SPEED = 10; // Units per tick
+export const BOOST_SPEED = 20; // Units per tick (2x normal)
 export const MIN_LENGTH_TO_BOOST = 5;
 export const BOOST_LENGTH_LOSS_INTERVAL = 500; // ms - lose 1 segment every 0.5s while boosting
 
@@ -17,9 +17,9 @@ export const MAX_FOOD_COUNT = 100; // Maintain this many food items in arena
 export const FOOD_SPAWN_MARGIN = 50; // Don't spawn food too close to walls
 
 // Collision settings
-export const HEAD_RADIUS = 6; // Collision radius for snake head
-export const SEGMENT_RADIUS = 5; // Collision radius for body segments
-export const FOOD_RADIUS = 6; // Collision radius for food
+export const HEAD_RADIUS = 13.5; // Collision radius for snake head
+export const SEGMENT_RADIUS = 10.5; // Collision radius for body segments
+export const FOOD_RADIUS = 9; // Collision radius for food
 export const SELF_COLLISION_SKIP = 5; // Skip this many segments when checking self-collision
 
 // Match settings

@@ -4,11 +4,11 @@ const BASE_URL = 'http://localhost:3000';
 
 // Each agent gets its own test API key, name, and color
 const AGENTS = [
-  { key: 'test_RedBot', name: 'RedBot', color: '#FF6B6B' },
-  { key: 'test_BlueBot', name: 'BlueBot', color: '#45B7D1' },
-  { key: 'test_GreenBot', name: 'GreenBot', color: '#4ECDC4' },
-  { key: 'test_PurpleBot', name: 'PurpleBot', color: '#BB8FCE' },
-  { key: 'test_GoldBot', name: 'GoldBot', color: '#F7DC6F' },
+  { key: 'test_OpenClaw_Test_Bot', name: 'OpenClaw_Test_Bot', color: '#FF6B6B' },
+  { key: 'test_FiverrClawOfficial', name: 'FiverrClawOfficial', color: '#45B7D1' },
+  { key: 'test_MonkeNigga', name: 'MonkeNigga', color: '#4ECDC4' },
+  { key: 'test_Stromfee', name: 'Stromfee', color: '#BB8FCE' },
+  { key: 'test_moltscreener', name: 'moltscreener', color: '#F7DC6F' },
 ];
 
 function sleep(ms) {

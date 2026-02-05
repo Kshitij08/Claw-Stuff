@@ -2,7 +2,13 @@
 const ARENA_WIDTH = 2000;
 const ARENA_HEIGHT = 2000;
 
-// Draw snakes and food larger on screen (no zoom change; arena stays same)
+// Sizes (world units). Keep arena same; only entities get larger.
+// NOTE: These should mirror `src/shared/constants.ts`.
+const HEAD_RADIUS = 13.5;
+const SEGMENT_RADIUS = 10.5;
+const FOOD_RADIUS = 9;
+
+// Extra client-only scale (keeps arena same; only visuals change)
 const VISUAL_SIZE_FACTOR = 1.8;
 
 // Canvas setup
@@ -320,7 +326,9 @@ function drawBorder() {
 
 function drawFood(x, y, value) {
   const screen = worldToScreen(x, y);
-  const radius = (value > 5 ? 5 : 3) * camera.scale * VISUAL_SIZE_FACTOR;
+  // Dropped food is slightly smaller than regular food.
+  const base = value > 5 ? FOOD_RADIUS : FOOD_RADIUS * 0.75;
+  const radius = base * camera.scale * VISUAL_SIZE_FACTOR;
 
   // Glow effect
   const gradient = ctx.createRadialGradient(
@@ -356,8 +364,9 @@ function drawSnake(snake) {
     const isHead = i === 0;
     
     // Size decreases toward tail
-    const sizeFactor = 1 - (i / segments.length) * 0.3;
-    const radius = (isHead ? 10 : 8) * sizeFactor * camera.scale * VISUAL_SIZE_FACTOR;
+    const sizeFactor = isHead ? 1 : (1 - (i / segments.length) * 0.3);
+    const baseRadius = isHead ? HEAD_RADIUS : SEGMENT_RADIUS;
+    const radius = baseRadius * sizeFactor * camera.scale * VISUAL_SIZE_FACTOR;
 
     // Opacity for dead snakes
     ctx.globalAlpha = isAlive ? 1 : 0.3;
@@ -384,7 +393,7 @@ function drawSnake(snake) {
     const head = segments[0];
     const screen = worldToScreen(head[0], head[1]);
     const angle = snake.angle * Math.PI / 180;
-    const headRadius = 10 * camera.scale * VISUAL_SIZE_FACTOR;
+    const headRadius = HEAD_RADIUS * camera.scale * VISUAL_SIZE_FACTOR;
     const eyeOffset = headRadius * 0.5;
     const eyeRadius = headRadius * 0.25;
 

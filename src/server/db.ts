@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { SKIN_PRESETS, DEFAULT_SKIN_ID } from '../shared/skins.js';
 
 const connectionString = process.env.DATABASE_URL;
 
@@ -63,6 +64,7 @@ export async function recordAgentJoin(opts: {
   playerId: string;
   matchId: string;
   color?: string;
+  skinId?: string;
 }) {
   try {
     // Ensure the match exists in the database before inserting into match_players
@@ -80,13 +82,14 @@ export async function recordAgentJoin(opts: {
 
     await dbQuery(
       `
-      INSERT INTO match_players (match_id, player_id, agent_name, color)
-      VALUES ($1, $2, $3, $4)
+      INSERT INTO match_players (match_id, player_id, agent_name, color, skin_id)
+      VALUES ($1, $2, $3, $4, $5)
       ON CONFLICT (match_id, agent_name) DO UPDATE
       SET player_id = EXCLUDED.player_id,
-          color     = COALESCE(EXCLUDED.color, match_players.color);
+          color     = COALESCE(EXCLUDED.color, match_players.color),
+          skin_id   = COALESCE(EXCLUDED.skin_id, match_players.skin_id);
     `,
-      [opts.matchId, opts.playerId, opts.agentName, opts.color ?? null],
+      [opts.matchId, opts.playerId, opts.agentName, opts.color ?? null, opts.skinId ?? null],
     );
   } catch (err) {
     console.error('[db] recordAgentJoin failed:', err);
@@ -95,9 +98,11 @@ export async function recordAgentJoin(opts: {
 
 export async function recordMatchEnd(opts: {
   matchId: string;
-  winnerName: string | null;
+  /** Canonical agent name (from agents table) so leaderboard wins match correctly. */
+  winnerAgentName: string | null;
   endedAt: number;
-  finalScores: { name: string; score: number; kills: number }[];
+  /** Use agent_name (canonical) so match_players rows are updated correctly. */
+  finalScores: { agentName: string; score: number; kills: number }[];
 }) {
   try {
     // Ensure the match row exists before recording the final result
@@ -111,7 +116,7 @@ export async function recordMatchEnd(opts: {
       SET winner_name = EXCLUDED.winner_name,
           ended_at    = EXCLUDED.ended_at;
     `,
-      [opts.matchId, opts.winnerName, opts.endedAt],
+      [opts.matchId, opts.winnerAgentName, opts.endedAt],
     );
 
     for (const row of opts.finalScores) {
@@ -123,7 +128,7 @@ export async function recordMatchEnd(opts: {
         SET score = EXCLUDED.score,
             kills = EXCLUDED.kills;
       `,
-        [opts.matchId, row.name, row.score, row.kills],
+        [opts.matchId, row.agentName, row.score, row.kills],
       );
     }
   } catch (err) {
@@ -222,9 +227,110 @@ export async function getGlobalLeaderboard(): Promise<{
  *   player_id  text,
  *   agent_name text NOT NULL REFERENCES agents(name) ON DELETE CASCADE,
  *   color      text,
+ *   skin_id    text,
  *   score      integer NOT NULL DEFAULT 0,
  *   kills      integer NOT NULL DEFAULT 0,
  *   PRIMARY KEY (match_id, agent_name)
  * );
+ *
+ * CREATE TABLE agent_skins (
+ *   agent_name text NOT NULL REFERENCES agents(name) ON DELETE CASCADE,
+ *   skin_id    text NOT NULL,
+ *   granted_at timestamptz NOT NULL DEFAULT now(),
+ *   PRIMARY KEY (agent_name, skin_id)
+ * );
  */
+
+// ============ Skins / Cosmetics ============
+
+export async function getAgentSkins(agentName: string): Promise<string[]> {
+  // If there is no database configured, assume only the default skin is available.
+  if (!pool) {
+    return [DEFAULT_SKIN_ID];
+  }
+
+  try {
+    const rows = await dbQuery<{ skin_id: string }>(
+      `
+      SELECT skin_id
+      FROM agent_skins
+      WHERE agent_name = $1;
+    `,
+      [agentName],
+    );
+
+    const owned = rows.map((r) => r.skin_id);
+
+    // Always ensure the default skin is owned.
+    if (!owned.includes(DEFAULT_SKIN_ID)) {
+      owned.push(DEFAULT_SKIN_ID);
+    }
+
+    // Filter to preset skin IDs (custom JSON combos are not in agent_skins).
+    const validIds = new Set(Object.keys(SKIN_PRESETS));
+    const uniqueOwned = Array.from(new Set(owned)).filter((id) => validIds.has(id));
+
+    return uniqueOwned.length > 0 ? uniqueOwned : [DEFAULT_SKIN_ID];
+  } catch (err) {
+    console.error('[db] getAgentSkins failed:', err);
+    return [DEFAULT_SKIN_ID];
+  }
+}
+
+export async function grantSkinToAgent(agentName: string, skinId: string): Promise<void> {
+  if (!pool) {
+    console.warn('[db] DATABASE_URL not set, skipping grantSkinToAgent');
+    return;
+  }
+
+  const validIds = new Set(Object.keys(SKIN_PRESETS));
+  if (!validIds.has(skinId)) {
+    console.warn(`[db] grantSkinToAgent called with unknown preset skinId: ${skinId}`);
+    return;
+  }
+
+  try {
+    await dbQuery(
+      `
+      INSERT INTO agent_skins (agent_name, skin_id)
+      VALUES ($1, $2)
+      ON CONFLICT (agent_name, skin_id) DO NOTHING;
+    `,
+      [agentName, skinId],
+    );
+  } catch (err) {
+    console.error('[db] grantSkinToAgent failed:', err);
+  }
+}
+
+export async function agentOwnsSkin(agentName: string, skinId: string): Promise<boolean> {
+  // Always allow default skin.
+  if (skinId === DEFAULT_SKIN_ID) {
+    return true;
+  }
+
+  if (!pool) {
+    // Without a database, only default is guaranteed.
+    return false;
+  }
+
+  try {
+    const rows = await dbQuery<{ exists: boolean }>(
+      `
+      SELECT EXISTS (
+        SELECT 1
+        FROM agent_skins
+        WHERE agent_name = $1 AND skin_id = $2
+      ) AS exists;
+    `,
+      [agentName, skinId],
+    );
+
+    return rows.length > 0 && !!rows[0].exists;
+  } catch (err) {
+    console.error('[db] agentOwnsSkin failed:', err);
+    return false;
+  }
+}
+
 

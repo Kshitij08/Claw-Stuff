@@ -31,8 +31,12 @@ Thumbs.db
 *.swp
 *.swo
 
+### Backups (DB dumps)
+backups/
+
 ### Misc
 coverage/
 .cache/
 tmp/
 temp/
+references/

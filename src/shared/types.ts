@@ -18,6 +18,8 @@ export interface Snake {
   id: string;
   name: string;
   color: string;
+  /** Identifier of the visual skin used for this snake */
+  skinId: string;
   segments: Segment[];
   angle: number; // Direction in degrees (0 = right, 90 = down, 180 = left, 270 = up)
   speed: number;
@@ -39,7 +41,9 @@ export interface Match {
   phase: MatchPhase;
   tick: number;
   startTime: number; // When match started (active phase)
-  endTime: number; // When match ends
+  endTime: number; // Scheduled end (startTime + duration)
+  /** Set when match actually stops (early or on time); used for correct survival duration */
+  actualEndTime?: number;
   snakes: Map<string, Snake>;
   food: Food[];
   winner?: string;
@@ -95,6 +99,12 @@ export interface JoinRequest {
   displayName?: string;
   /** Optional hex color for the snake, e.g. "#FF6B6B" */
   color?: string;
+  /** Optional preset skin ID (must be owned by the agent) */
+  skinId?: string;
+  /** Optional custom combo: Body/Eyes/Mouth paths (e.g. "Common/aqua.png") */
+  bodyId?: string;
+  eyesId?: string;
+  mouthId?: string;
 }
 
 export interface JoinResponse {
@@ -118,6 +128,10 @@ export interface GameStateResponse {
   };
   you?: {
     id: string;
+    /** Resolved skin parts for rendering (Body/Eyes/Mouth paths) */
+    bodyId: string;
+    eyesId: string;
+    mouthId: string;
     alive: boolean;
     x: number;
     y: number;
@@ -131,6 +145,10 @@ export interface GameStateResponse {
   players: {
     id: string;
     name: string;
+    /** Resolved skin parts for rendering */
+    bodyId: string;
+    eyesId: string;
+    mouthId: string;
     alive: boolean;
     x: number;
     y: number;
@@ -144,7 +162,7 @@ export interface GameStateResponse {
     deathTick?: number;
   }[];
   food: { x: number; y: number; value: number }[];
-  leaderboard: { id: string; name: string; score: number }[];
+  leaderboard: { id: string; name: string; score: number; survivalMs: number }[];
 }
 
 // POST /api/match/action
@@ -180,6 +198,15 @@ export interface LeaderboardResponse {
   }[];
 }
 
+// ============ Skins / Cosmetics ============
+
+/** Public information about a skin that can be used by agents. */
+export interface SkinInfo {
+  id: string;
+  name: string;
+  description: string;
+}
+
 // ============ WebSocket Events (for spectators) ============
 
 export interface SpectatorGameState {
@@ -191,7 +218,13 @@ export interface SpectatorGameState {
     id: string;
     name: string;
     color: string;
+    /** Resolved skin parts for rendering (Body/Eyes/Mouth paths) */
+    bodyId: string;
+    eyesId: string;
+    mouthId: string;
     score: number;
+    /** Time survived in ms (for ranking/display) */
+    survivalMs: number;
     segments: [number, number][];
     angle: number;
     boosting: boolean;
@@ -202,7 +235,7 @@ export interface SpectatorGameState {
 
 export interface SpectatorMatchEnd {
   matchId: string;
-  winner: { name: string; score: number } | null;
-  finalScores: { name: string; score: number; kills: number }[];
+  winner: { name: string; score: number; survivalMs: number; bodyId?: string; eyesId?: string; mouthId?: string } | null;
+  finalScores: { name: string; score: number; kills: number; survivalMs: number }[];
   nextMatchStartsAt: number;
 }

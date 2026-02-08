@@ -1,5 +1,6 @@
 import { GameEngine } from './engine.js';
 import { Player, MatchResult, AgentInfo, SpectatorGameState, SpectatorMatchEnd } from '../../shared/types.js';
+import { resolveSkinToParts } from '../../shared/skins.js';
 import { recordAgentJoin, recordMatchEnd, getHighestMatchId } from '../db.js';
 import {
   MATCH_DURATION,
@@ -7,7 +8,11 @@ import {
   RESULTS_DURATION,
   MATCH_INTERVAL,
   MAX_PLAYERS,
+  TICK_INTERVAL,
 } from '../../shared/constants.js';
+
+// In local/test mode (non-production), skip the 60s lobby countdown
+const EFFECTIVE_LOBBY_DURATION = process.env.NODE_ENV === 'production' ? LOBBY_DURATION : 0;
 
 export class MatchManager {
   private engine: GameEngine;
@@ -123,12 +128,40 @@ export class MatchManager {
     const match = this.engine.getMatch();
     if (!match) return;
 
-    // Calculate final scores
-    const finalScores = Array.from(match.snakes.values())
-      .map(s => ({ name: s.name, score: s.score, kills: s.kills ?? 0 }))
-      .sort((a, b) => b.score - a.score);
-
+    // Rank by survival time first; if 2+ survived to the end, tiebreak by score/length
+    const matchDurationMs = (match.actualEndTime ?? match.endTime) - match.startTime;
+    const withSurvival = Array.from(match.snakes.values())
+      .map(s => {
+        const survivalMs = s.alive
+          ? matchDurationMs
+          : (s.deathTick ?? 0) * TICK_INTERVAL;
+        return { name: s.name, score: s.score, kills: s.kills ?? 0, survivalMs };
+      })
+      .sort((a, b) => {
+        if (b.survivalMs !== a.survivalMs) return b.survivalMs - a.survivalMs;
+        return b.score - a.score;
+      });
+    const finalScores = withSurvival.map(({ name, score, kills }) => ({ name, score, kills }));
+    // Map display name -> canonical agent name for DB (leaderboard uses agent_name)
+    const displayNameToAgent = new Map<string, string>();
+    for (const snake of match.snakes.values()) {
+      const agentName = this.players.get(snake.id)?.agentInfo.name ?? snake.name;
+      displayNameToAgent.set(snake.name, agentName);
+    }
+    const finalScoresForDb = finalScores.map(({ name, score, kills }) => ({
+      agentName: displayNameToAgent.get(name) ?? name,
+      score,
+      kills,
+    }));
     const winner = finalScores.length > 0 ? finalScores[0] : null;
+    const winnerAgentName = winner ? (displayNameToAgent.get(winner.name) ?? winner.name) : null;
+
+    // Add 1s to winner's displayed survival so they rank clearly first when game ends with one survivor (top 2 would otherwise tie)
+    const WINNER_SURVIVAL_BONUS_MS = 1000;
+    const finalScoresForSpectators = withSurvival.map((entry, i) => ({
+      ...entry,
+      survivalMs: entry.survivalMs + (i === 0 ? WINNER_SURVIVAL_BONUS_MS : 0),
+    }));
 
     // Update all-time stats
     if (winner) {
@@ -162,20 +195,31 @@ export class MatchManager {
 
     console.log(`Match ${match.id} ended. Winner: ${winner?.name || 'None'}`);
 
-    // Persist to database (best-effort)
+    // Persist to database (best-effort). Use canonical agent names so leaderboard wins match.
     recordMatchEnd({
       matchId: match.id,
-      winnerName: winner?.name ?? null,
+      winnerAgentName: winnerAgentName,
       endedAt,
-      finalScores,
+      finalScores: finalScoresForDb,
     }).catch(() => {});
 
-    // Notify spectators
+    // Notify spectators (include winner skin + survival time for display)
     if (this.onMatchEndCallback) {
+      const winnerEntry = withSurvival[0] ?? null;
+      let winnerWithSkin = winnerEntry
+        ? { name: winnerEntry.name, score: winnerEntry.score, survivalMs: winnerEntry.survivalMs + WINNER_SURVIVAL_BONUS_MS }
+        : null;
+      if (winnerWithSkin) {
+        const winnerSnake = Array.from(match.snakes.values()).find(s => s.name === winnerWithSkin!.name);
+        if (winnerSnake) {
+          const parts = resolveSkinToParts(winnerSnake.skinId);
+          winnerWithSkin = { ...winnerWithSkin, bodyId: parts.bodyId, eyesId: parts.eyesId, mouthId: parts.mouthId };
+        }
+      }
       this.onMatchEndCallback({
         matchId: match.id,
-        winner,
-        finalScores,
+        winner: winnerWithSkin,
+        finalScores: finalScoresForSpectators,
         nextMatchStartsAt: this.nextMatchStartTime,
       });
     }
@@ -191,7 +235,13 @@ export class MatchManager {
   }
 
   // Player management
-  joinMatch(apiKey: string, agentInfo: AgentInfo, displayName?: string, color?: string): {
+  joinMatch(
+    apiKey: string,
+    agentInfo: AgentInfo,
+    displayName?: string,
+    color?: string,
+    skinId?: string,
+  ): {
     success: boolean;
     playerId?: string;
     matchId?: string;
@@ -242,7 +292,7 @@ export class MatchManager {
     const playerId = `player_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const name = displayName || agentInfo.name;
 
-    const snake = this.engine.addPlayer(playerId, name, color);
+    const snake = this.engine.addPlayer(playerId, name, color, skinId);
     if (!snake) {
       return {
         success: false,
@@ -260,22 +310,21 @@ export class MatchManager {
     };
     this.players.set(playerId, player);
 
-    // Start the 1-minute countdown only when the second bot joins.
-    // Until then, the first bot waits in the lobby.
+    // Start countdown when the second bot joins.
     if (isSecond) {
       const now = Date.now();
-      this.currentMatchStartTime = now + LOBBY_DURATION;
-      this.nextMatchStartTime = this.currentMatchStartTime + MATCH_DURATION + RESULTS_DURATION + LOBBY_DURATION;
+      this.currentMatchStartTime = now + EFFECTIVE_LOBBY_DURATION;
+      this.nextMatchStartTime = this.currentMatchStartTime + MATCH_DURATION + RESULTS_DURATION + EFFECTIVE_LOBBY_DURATION;
 
       if (this.lobbyStartTimeout) {
         clearTimeout(this.lobbyStartTimeout);
       }
-      this.lobbyStartTimeout = setTimeout(() => this.startMatch(), LOBBY_DURATION);
+      this.lobbyStartTimeout = setTimeout(() => this.startMatch(), EFFECTIVE_LOBBY_DURATION);
 
       console.log(
-        `Second bot joined lobby for ${match.id}. Match will start in ${LOBBY_DURATION / 1000}s (at ${new Date(
-          this.currentMatchStartTime,
-        ).toISOString()}).`,
+        EFFECTIVE_LOBBY_DURATION > 0
+          ? `Second bot joined lobby for ${match.id}. Match will start in ${EFFECTIVE_LOBBY_DURATION / 1000}s (at ${new Date(this.currentMatchStartTime).toISOString()}).`
+          : `Second bot joined lobby for ${match.id}. Starting match immediately (local test mode).`,
       );
     } else if (wasFirst) {
       console.log(`First bot joined lobby for ${match.id}. Waiting for another bot to join before countdown.`);
@@ -288,6 +337,7 @@ export class MatchManager {
       playerId,
       matchId: match.id,
       color,
+      skinId: skinId ?? undefined,
     }).catch(() => {});
 
     const timeUntilStart = Math.max(0, this.currentMatchStartTime - Date.now());
@@ -369,25 +419,12 @@ export class MatchManager {
       this.engine.steerPlayer(playerId, angle, angleDelta);
     }
 
-    // Handle boost
-    if (action === 'boost' || boost !== undefined) {
-      const shouldBoost = action === 'boost' ? (active ?? true) : (boost ?? false);
-      const result = this.engine.setPlayerBoost(playerId, shouldBoost);
-      if (!result.success && shouldBoost) {
-        return {
-          success: false,
-          error: 'TOO_SHORT',
-          message: `Minimum length 5 required to boost. Current length: ${snake.segments.length}`,
-        };
-      }
-    }
-
     const updatedSnake = this.engine.getPlayerState(playerId)!;
     return {
       success: true,
       tick: match.tick,
       newAngle: updatedSnake.angle,
-      boosting: updatedSnake.boosting,
+      boosting: false,
       speed: updatedSnake.speed,
       length: updatedSnake.segments.length,
     };
@@ -432,7 +469,7 @@ export class MatchManager {
       nextMatch: {
         id: `match_${this.nextMatchId}`,
         // When current match is in lobby with no players, we don't know when next match will open
-        lobbyOpensAt: hasNextMatchTimes ? this.nextMatchStartTime - LOBBY_DURATION : 0,
+        lobbyOpensAt: hasNextMatchTimes ? this.nextMatchStartTime - EFFECTIVE_LOBBY_DURATION : 0,
         startsAt: hasNextMatchTimes ? this.nextMatchStartTime : 0,
       },
     };

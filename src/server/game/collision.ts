@@ -43,7 +43,7 @@ export function checkSnakeCollision(
   return false;
 }
 
-// Check if snake head collides with arena walls
+// Check if snake head is past arena walls (used to trigger wrap)
 export function checkWallCollision(head: Point): boolean {
   return (
     head.x - HEAD_RADIUS < 0 ||
@@ -51,6 +51,12 @@ export function checkWallCollision(head: Point): boolean {
     head.y - HEAD_RADIUS < 0 ||
     head.y + HEAD_RADIUS > ARENA_HEIGHT
   );
+}
+
+// Wrap a point to the opposite side of the arena (toroidal / classic snake wrap)
+export function wrapPointInArena(point: Point): void {
+  point.x = ((point.x % ARENA_WIDTH) + ARENA_WIDTH) % ARENA_WIDTH;
+  point.y = ((point.y % ARENA_HEIGHT) + ARENA_HEIGHT) % ARENA_HEIGHT;
 }
 
 // Check if two snake heads collide (both die)

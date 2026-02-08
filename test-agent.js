@@ -2,10 +2,36 @@
 const BASE_URL = 'http://localhost:3000';
 const API_KEY = 'test_TestAgent';
 
+const FALLBACK_SKIN_IDS = ['default', 'neon', 'cyber'];
+
 const HEADERS = {
   'Authorization': `Bearer ${API_KEY}`,
   'Content-Type': 'application/json',
 };
+
+async function fetchSkinOptions() {
+  try {
+    const res = await fetch(`${BASE_URL}/api/skins/options`);
+    const data = await res.json();
+    if (data.bodies?.length && data.eyes?.length && data.mouths?.length) {
+      return data;
+    }
+  } catch (err) {
+    console.warn('Could not fetch skin options:', err.message);
+  }
+  return null;
+}
+
+function randomSkinFromOptions(options) {
+  if (!options) {
+    return { skinId: FALLBACK_SKIN_IDS[Math.floor(Math.random() * FALLBACK_SKIN_IDS.length)] };
+  }
+  return {
+    bodyId: options.bodies[Math.floor(Math.random() * options.bodies.length)],
+    eyesId: options.eyes[Math.floor(Math.random() * options.eyes.length)],
+    mouthId: options.mouths[Math.floor(Math.random() * options.mouths.length)],
+  };
+}
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -76,12 +102,15 @@ async function main() {
   console.log(`Current match: ${status.currentMatch?.id || 'None'} (${status.currentMatch?.phase || 'no match'})`);
   console.log(`Players in match: ${status.currentMatch?.playerCount || 0}`);
 
-  // 2. Join match
+  // 2. Fetch skin options from public/skins and pick random body/eyes/mouth
+  const skinOptions = await fetchSkinOptions();
+  const skin = randomSkinFromOptions(skinOptions);
+  const joinBody = { displayName: 'TestSnake', ...skin };
   console.log('\nJoining match...');
   const joinRes = await fetch(`${BASE_URL}/api/match/join`, {
     method: 'POST',
     headers: HEADERS,
-    body: JSON.stringify({ displayName: 'TestSnake' }),
+    body: JSON.stringify(joinBody),
   });
   const join = await joinRes.json();
   
@@ -89,7 +118,8 @@ async function main() {
     console.log('Failed to join:', join.message);
     return;
   }
-  console.log(`✓ Joined as ${join.playerId}`);
+  const skinDesc = skin.skinId ? `preset: ${skin.skinId}` : `body=${skin.bodyId} eyes=${skin.eyesId} mouth=${skin.mouthId}`;
+  console.log(`✓ Joined as ${join.playerId} (skin: ${skinDesc})`);
   console.log(`  Message: ${join.message}`);
 
   // 3. Wait for match to start
@@ -252,68 +282,23 @@ async function main() {
         targetAngle = normalizeAngle(angleToEnemy + 180);
       }
 
-      // Wall avoidance - check if we're heading toward a wall
-      const margin = 100;
-      const lookAhead = 80;
-      const futureX = myPos.x + Math.cos(me.angle * Math.PI / 180) * lookAhead;
-      const futureY = myPos.y + Math.sin(me.angle * Math.PI / 180) * lookAhead;
-      
-      let wallDanger = false;
-      if (futureX < margin || futureX > state.arena.width - margin ||
-          futureY < margin || futureY > state.arena.height - margin) {
-        wallDanger = true;
-        // Turn toward center
-        const centerX = state.arena.width / 2;
-        const centerY = state.arena.height / 2;
-        targetAngle = getAngleTo(myPos, { x: centerX, y: centerY });
-      }
-      
+      // Walls wrap to the opposite side (classic snake) - no need to avoid them
+
       // Calculate turn amount using shortest path
       let turn = getShortestTurn(me.angle, targetAngle);
       
       // Use proportional control - smaller turns when angle difference is small
       let maxTurn = 20; // Default max turn
-      if (wallDanger || selfDanger) maxTurn = 45; // Turn faster to avoid danger
+      if (selfDanger) maxTurn = 45; // Turn faster to avoid self-collision
       else if (Math.abs(turn) < 10) maxTurn = 10; // Gentle correction when almost aligned
       
       turn = Math.max(-maxTurn, Math.min(maxTurn, turn));
-      
-      // Decide on boost - strategy-aware:
-      // - Early game: grow safely, only boost for very close food and no close enemies.
-      // - Mid game: boost for close food and when chasing smaller enemies.
-      // - Late game:
-      //     * If leader: play safe, boost rarely.
-      //     * If behind: more aggressive boosting.
-      let shouldBoost = false;
 
-      const enemyVeryClose = nearestEnemy && nearestEnemyDist < 120;
-      const safeFromBigEnemy = !enemyIsBigger || !enemyVeryClose;
-
-      if (!wallDanger && !selfDanger && me.length > 15 && safeFromBigEnemy) {
-        if (earlyGame) {
-          shouldBoost = minDist < 40 && !enemyVeryClose;
-        } else if (midGame) {
-          shouldBoost =
-            minDist < 60 ||
-            (enemyIsSmaller && enemyVeryClose);
-        } else if (lateGame) {
-          if (isLeader) {
-            // Leader: small, safe boosts only
-            shouldBoost = minDist < 30 && !enemyVeryClose;
-          } else {
-            // Not leader: take more risks
-            shouldBoost =
-              minDist < 70 ||
-              (enemyIsSmaller && enemyVeryClose);
-          }
-        }
-      }
-      
-      // Send action
+      // Send action (boost mechanic removed)
       const actionRes = await fetch(`${BASE_URL}/api/match/action`, {
         method: 'POST',
         headers: HEADERS,
-        body: JSON.stringify({ action: 'steer', angleDelta: turn, boost: shouldBoost }),
+        body: JSON.stringify({ action: 'steer', angleDelta: turn }),
       });
       const action = await actionRes.json();
       
@@ -322,10 +307,7 @@ async function main() {
       if (tickCount % 10 === 0 || me.score !== lastScore) {
         const logTime = Math.floor(timeLeft);
         const foodInfo = bestFood ? `Food: ${Math.round(minDist)}u` : 'No food';
-        let status = '';
-        if (wallDanger) status = '⚠️ WALL';
-        else if (selfDanger) status = '🔄 SELF';
-        else if (shouldBoost) status = '🚀';
+        let status = selfDanger ? '🔄 SELF' : '';
         console.log(`[${timeLeft}s] Score: ${me.score} | Len: ${me.length} | ${foodInfo} | Turn: ${turn.toFixed(0)}° ${status}`);
         lastScore = me.score;
       }

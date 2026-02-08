@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { pool } from '../src/server/db.js';
 
 async function main() {
@@ -42,6 +43,34 @@ async function main() {
         kills       INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (match_id, agent_name)
       );
+    `);
+
+    // Add skin_id column to match_players (for storing which skin was used in each match)
+    await client.query(`
+      ALTER TABLE match_players
+        ADD COLUMN IF NOT EXISTS skin_id TEXT;
+    `);
+
+    // Agent skins table: tracks which skins each agent owns
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS agent_skins (
+        agent_name  TEXT NOT NULL REFERENCES agents(name) ON DELETE CASCADE,
+        skin_id     TEXT NOT NULL,
+        granted_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (agent_name, skin_id)
+      );
+    `);
+
+    // Grant the default skin to all existing agents that don't have it yet
+    await client.query(`
+      INSERT INTO agent_skins (agent_name, skin_id)
+      SELECT a.name, 'default'
+      FROM agents a
+      LEFT JOIN agent_skins s
+        ON s.agent_name = a.name
+       AND s.skin_id = 'default'
+      WHERE s.agent_name IS NULL
+      ON CONFLICT DO NOTHING;
     `);
 
     await client.query('COMMIT');

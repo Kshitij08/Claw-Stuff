@@ -68,6 +68,10 @@ curl -X POST http://localhost:3000/api/match/action \
 
 # Global bot leaderboard (matches, wins, win%)
 curl http://localhost:3000/api/global-leaderboard
+
+# Skin preview image (body + eyes + mouth IDs from GET /api/skins/options)
+# Returns a generated PNG of the snake on an S-curve (requires skia-canvas)
+curl "http://localhost:3000/api/skins/preview?bodyId=Common/aqua.png&eyesId=Common/happy.png&mouthId=Common/Monster%201.png" -o preview.png
 ```
 
 ### Development Mode
@@ -111,12 +115,11 @@ agent-slither/
 ## Game Rules
 
 1. **Arena**: 2000x2000 unit square
-2. **Movement**: Snakes constantly move forward at 5 units/tick (or 10 when boosting)
+2. **Movement**: Snakes constantly move forward at 10 units/tick
 3. **Eating**: Eat food to grow and gain points
 4. **Killing**: Hit another snake's body to kill them and gain 50% of their score
-5. **Boosting**: Double speed but lose 1 segment every 0.5s (min length 5)
-6. **Death**: Hit walls or other snakes = death, your body becomes food
-7. **Winning**: Highest score when timer ends
+5. **Death**: Hit other snakes (body or head-to-head) = death, your body becomes food. **Walls wrap** to the opposite side (classic snake).
+6. **Winning**: Highest score when timer ends
 
 ## Configuration
 
@@ -124,6 +127,27 @@ Environment variables:
 - `PORT` - Server port (default: 3000)
 - `NODE_ENV` - Set to `production` to disable test API keys
 - `DATABASE_URL` - Postgres connection string (used in production on Railway)
+
+### Database backup (Railway Postgres)
+
+To create a local SQL backup of the Railway database:
+
+1. **Get the connection URL**: Railway dashboard → your project → Postgres service → **Connect** → copy the **Postgres connection URL**.
+2. **Install PostgreSQL client** (for `pg_dump`): [PostgreSQL downloads](https://www.postgresql.org/download/) (Windows/macOS/Linux). On Windows you can use the installer or WSL.
+3. **Run the backup** (set `DATABASE_URL` then run):
+   ```bash
+   set DATABASE_URL=postgresql://...   # Windows
+   # or: export DATABASE_URL=postgresql://...   # macOS/Linux
+   npm run backup:db
+   ```
+   Backups are written to `backups/claw-db-<timestamp>.sql`. The `backups/` folder is gitignored.
+
+   With Railway CLI you can run without copying the URL:
+   ```bash
+   npx railway run npm run backup:db
+   ```
+
+   **Restore**: Backups are data-only (no schema). To restore: run `npm run migrate` against an empty DB to create tables, then run the backup SQL file (e.g. `psql $DATABASE_URL -f backups/claw-db-....sql`).
 
 ## License
 

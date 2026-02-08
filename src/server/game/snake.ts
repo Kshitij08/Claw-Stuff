@@ -1,10 +1,10 @@
 import { Snake, Segment, Point } from '../../shared/types.js';
+import { DEFAULT_SKIN_ID } from '../../shared/skins.js';
 import {
   INITIAL_SNAKE_LENGTH,
   NORMAL_SPEED,
-  BOOST_SPEED,
-  MIN_LENGTH_TO_BOOST,
-  SNAKE_SEGMENT_SIZE,
+  SEGMENT_SPACING_FRONT,
+  SEGMENT_SPACING_TAIL,
 } from '../../shared/constants.js';
 
 // Predefined colors for snakes
@@ -36,25 +36,29 @@ export function createSnake(
   spawnY: number,
   spawnAngle: number,
   color?: string, // optional custom color
+  skinId: string = DEFAULT_SKIN_ID,
 ): Snake {
   const segments: Segment[] = [];
-  
-  // Create initial segments behind the head
   const angleRad = (spawnAngle * Math.PI) / 180;
-  const dx = -Math.cos(angleRad) * SNAKE_SEGMENT_SIZE;
-  const dy = -Math.sin(angleRad) * SNAKE_SEGMENT_SIZE;
-  
-  for (let i = 0; i < INITIAL_SNAKE_LENGTH; i++) {
-    segments.push({
-      x: spawnX + dx * i,
-      y: spawnY + dy * i,
-    });
+  // Tapered spacing: large gap at head, decreasing toward tail
+  const n = INITIAL_SNAKE_LENGTH;
+  let run = 0;
+  for (let i = 0; i < n; i++) {
+    if (i > 0) {
+      const t = n <= 1 ? 0 : (i - 1) / (n - 1);
+      const gap = SEGMENT_SPACING_FRONT - t * (SEGMENT_SPACING_FRONT - SEGMENT_SPACING_TAIL);
+      run += gap;
+    }
+    const dx = -Math.cos(angleRad) * run;
+    const dy = -Math.sin(angleRad) * run;
+    segments.push({ x: spawnX + dx, y: spawnY + dy });
   }
   
   return {
     id,
     name,
     color: color || getNextColor(),
+    skinId,
     segments,
     angle: spawnAngle,
     speed: NORMAL_SPEED,
@@ -70,23 +74,39 @@ export function getSnakeHead(snake: Snake): Point {
   return snake.segments[0];
 }
 
+function dist(a: Point, b: Point): number {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+/** Required gap before adding a new segment; larger when snake is longer so front has big gaps, tail stays tight. */
+function requiredSegmentSpacing(segmentCount: number): number {
+  const range = SEGMENT_SPACING_FRONT - SEGMENT_SPACING_TAIL;
+  const growth = Math.max(0, segmentCount - INITIAL_SNAKE_LENGTH);
+  const cap = 26; // growth range over which we go from TAIL to FRONT spacing (larger = tail stays tight for more segments)
+  const t = Math.min(1, growth / cap);
+  return SEGMENT_SPACING_TAIL + t * range;
+}
+
 export function moveSnake(snake: Snake): void {
   if (!snake.alive) return;
-  
   const head = snake.segments[0];
   const angleRad = (snake.angle * Math.PI) / 180;
-  
-  // Calculate new head position
   const newHead: Segment = {
     x: head.x + Math.cos(angleRad) * snake.speed,
     y: head.y + Math.sin(angleRad) * snake.speed,
   };
-  
-  // Add new head at front
-  snake.segments.unshift(newHead);
-  
-  // Remove tail (unless growing)
-  snake.segments.pop();
+  const len = snake.segments.length;
+  const required = len <= 1 ? SEGMENT_SPACING_TAIL : requiredSegmentSpacing(len);
+  const distToNext = len <= 1 ? required + 1 : dist(newHead, snake.segments[1]);
+  if (distToNext >= required) {
+    snake.segments.unshift(newHead);
+    snake.segments.pop();
+  } else {
+    (snake.segments[0] as Segment).x = newHead.x;
+    (snake.segments[0] as Segment).y = newHead.y;
+  }
 }
 
 export function growSnake(snake: Snake, amount: number = 1): void {
@@ -97,24 +117,10 @@ export function growSnake(snake: Snake, amount: number = 1): void {
   }
 }
 
-export function shrinkSnake(snake: Snake): Segment | null {
-  if (snake.segments.length <= MIN_LENGTH_TO_BOOST) {
-    snake.boosting = false;
-    snake.speed = NORMAL_SPEED;
-    return null;
-  }
-  
-  // Remove and return the tail segment
-  return snake.segments.pop() || null;
-}
-
-export function setSnakeBoost(snake: Snake, boosting: boolean): boolean {
-  if (boosting && snake.segments.length < MIN_LENGTH_TO_BOOST) {
-    return false; // Can't boost if too short
-  }
-  
-  snake.boosting = boosting;
-  snake.speed = boosting ? BOOST_SPEED : NORMAL_SPEED;
+export function setSnakeBoost(snake: Snake, _boosting: boolean): boolean {
+  // Boost mechanic removed; always keep normal speed
+  snake.boosting = false;
+  snake.speed = NORMAL_SPEED;
   return true;
 }
 

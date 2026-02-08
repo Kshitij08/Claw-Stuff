@@ -1,19 +1,16 @@
 import { Snake, Food, Match, MatchPhase, Point, SpectatorGameState } from '../../shared/types.js';
+import { resolveSkinToParts } from '../../shared/skins.js';
 import {
   ARENA_WIDTH,
   ARENA_HEIGHT,
   TICK_INTERVAL,
-  BOOST_LENGTH_LOSS_INTERVAL,
-  KILL_BONUS_PERCENTAGE,
   DROPPED_FOOD_VALUE,
   NORMAL_SPEED,
-  BOOST_SPEED,
 } from '../../shared/constants.js';
 import {
   createSnake,
   moveSnake,
   growSnake,
-  shrinkSnake,
   killSnake,
   getSnakeHead,
   resetColorIndex,
@@ -27,6 +24,7 @@ import {
 import {
   checkFoodCollision,
   checkWallCollision,
+  wrapPointInArena,
   findCollisionTarget,
   checkHeadCollision,
 } from './collision.js';
@@ -57,7 +55,7 @@ export class GameEngine {
     return this.match;
   }
 
-  addPlayer(playerId: string, name: string, color?: string): Snake | null {
+  addPlayer(playerId: string, name: string, color?: string, skinId?: string): Snake | null {
     if (!this.match || this.match.phase !== 'lobby') {
       return null;
     }
@@ -68,7 +66,7 @@ export class GameEngine {
     const spawnY = margin + Math.random() * (ARENA_HEIGHT - 2 * margin);
     const spawnAngle = Math.random() * 360;
 
-    const snake = createSnake(playerId, name, spawnX, spawnY, spawnAngle, color);
+    const snake = createSnake(playerId, name, spawnX, spawnY, spawnAngle, color, skinId);
     this.match.snakes.set(playerId, snake);
     return snake;
   }
@@ -102,6 +100,7 @@ export class GameEngine {
       this.tickTimer = null;
     }
     if (this.match) {
+      this.match.actualEndTime = Date.now();
       this.match.phase = 'finished';
       this.determineWinner();
       if (this.onMatchEndCallback) {
@@ -134,26 +133,13 @@ export class GameEngine {
     for (const [playerId, snake] of this.match.snakes) {
       if (!snake.alive) continue;
 
-      // Handle boost length loss
-      if (snake.boosting && now - snake.lastBoostLoss >= BOOST_LENGTH_LOSS_INTERVAL) {
-        const droppedSegment = shrinkSnake(snake);
-        if (droppedSegment) {
-          const droppedFood = createDroppedFood(droppedSegment);
-          this.match.food.push(droppedFood);
-          snake.lastBoostLoss = now;
-        }
-      }
-
       // Move snake
       moveSnake(snake);
       const head = getSnakeHead(snake);
 
-      // Check wall collision
+      // Wrap at walls (classic snake: appear on opposite side)
       if (checkWallCollision(head)) {
-        console.log(`[DEATH] Snake ${snake.name} hit wall at tick ${this.match.tick}. Head: (${head.x.toFixed(1)}, ${head.y.toFixed(1)})`);
-        killSnake(snake, undefined, this.match.tick);
-        this.dropSnakeAsFood(snake);
-        continue;
+        wrapPointInArena(head);
       }
 
       // Check collision with other snakes' bodies
@@ -163,14 +149,6 @@ export class GameEngine {
         console.log(`[DEATH] Snake ${snake.name} hit ${collision.snakeId === playerId ? 'SELF' : hitSnake?.name} at tick ${this.match.tick}. Head: (${head.x.toFixed(1)}, ${head.y.toFixed(1)}), segment ${collision.segmentIndex}`);
         killSnake(snake, collision.snakeId, this.match.tick);
         this.dropSnakeAsFood(snake);
-
-        // Award kill bonus to the killer
-        const killer = this.match.snakes.get(collision.snakeId);
-        if (killer && killer.alive) {
-          const bonus = Math.floor(snake.score * KILL_BONUS_PERCENTAGE);
-          killer.score += bonus;
-          killer.kills = (killer.kills ?? 0) + 1;
-        }
         continue;
       }
 
@@ -202,26 +180,17 @@ export class GameEngine {
           const len2 = snake2.segments.length;
 
           if (len1 === len2) {
-            // Tie: keep existing behavior (both die)
+            // Tie: both die
             killSnake(snake1, snake2.id, this.match.tick);
             killSnake(snake2, snake1.id, this.match.tick);
             this.dropSnakeAsFood(snake1);
             this.dropSnakeAsFood(snake2);
-            // Both get a kill credit for head-on collision
-            snake1.kills = (snake1.kills ?? 0) + 1;
-            snake2.kills = (snake2.kills ?? 0) + 1;
           } else {
-            // Bigger snake survives
+            // Bigger snake survives (no score bonus)
             const winner = len1 > len2 ? snake1 : snake2;
             const loser = winner === snake1 ? snake2 : snake1;
-
             killSnake(loser, winner.id, this.match.tick);
             this.dropSnakeAsFood(loser);
-
-            // Award kill credit + bonus
-            const bonus = Math.floor(loser.score * KILL_BONUS_PERCENTAGE);
-            winner.score += bonus;
-            winner.kills = (winner.kills ?? 0) + 1;
           }
         }
       }
@@ -298,25 +267,35 @@ export class GameEngine {
     if (!this.match) {
       throw new Error('No active match');
     }
-
-    const timeRemaining = Math.max(0, (this.match.endTime - Date.now()) / 1000);
+    const match = this.match;
+    const timeRemaining = Math.max(0, (match.endTime - Date.now()) / 1000);
 
     return {
-      matchId: this.match.id,
-      phase: this.match.phase,
-      tick: this.match.tick,
+      matchId: match.id,
+      phase: match.phase,
+      tick: match.tick,
       timeRemaining,
-      snakes: Array.from(this.match.snakes.values()).map(snake => ({
-        id: snake.id,
-        name: snake.name,
-        color: snake.color,
-        score: snake.score,
-        segments: snake.segments.map(s => [s.x, s.y] as [number, number]),
-        angle: snake.angle,
-        boosting: snake.boosting,
-        alive: snake.alive,
-      })),
-      food: this.match.food.map(f => [f.x, f.y, f.value] as [number, number, number]),
+      snakes: Array.from(match.snakes.values()).map(snake => {
+        const parts = resolveSkinToParts(snake.skinId);
+        const survivalMs = snake.alive
+          ? match.tick * TICK_INTERVAL
+          : (snake.deathTick ?? 0) * TICK_INTERVAL;
+        return {
+          id: snake.id,
+          name: snake.name,
+          color: snake.color,
+          bodyId: parts.bodyId,
+          eyesId: parts.eyesId,
+          mouthId: parts.mouthId,
+          score: snake.score,
+          survivalMs,
+          segments: snake.segments.map(s => [s.x, s.y] as [number, number]),
+          angle: snake.angle,
+          boosting: snake.boosting,
+          alive: snake.alive,
+        };
+      }),
+      food: match.food.map(f => [f.x, f.y, f.value] as [number, number, number]),
     };
   }
 
@@ -336,27 +315,9 @@ export class GameEngine {
     return snake.angle;
   }
 
-  setPlayerBoost(playerId: string, boosting: boolean): { success: boolean; snake?: Snake } {
-    if (!this.match || this.match.phase !== 'active') {
-      return { success: false };
-    }
-
-    const snake = this.match.snakes.get(playerId);
-    if (!snake || !snake.alive) {
-      return { success: false };
-    }
-
-    if (boosting && snake.segments.length < 5) {
-      return { success: false };
-    }
-
-    snake.boosting = boosting;
-    snake.speed = boosting ? BOOST_SPEED : NORMAL_SPEED;
-    if (boosting) {
-      snake.lastBoostLoss = Date.now();
-    }
-
-    return { success: true, snake };
+  setPlayerBoost(_playerId: string, _boosting: boolean): { success: boolean; snake?: Snake } {
+    // Boost mechanic removed; always treat as not boosting
+    return { success: true };
   }
 
   getPlayerState(playerId: string): Snake | undefined {

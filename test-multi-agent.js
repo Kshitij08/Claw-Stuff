@@ -1,12 +1,38 @@
-// Multi-agent test script: spawns 5 agents with different names and colors
+// Multi-agent test script: spawns 5 agents with different names, colors, and random skins from public/skins
 
 const BASE_URL = 'http://localhost:3000';
+
+const FALLBACK_SKIN_IDS = ['default', 'neon', 'cyber'];
+
+async function fetchSkinOptions() {
+  try {
+    const res = await fetch(`${BASE_URL}/api/skins/options`);
+    const data = await res.json();
+    if (data.bodies?.length && data.eyes?.length && data.mouths?.length) {
+      return data;
+    }
+  } catch (err) {
+    console.warn('Could not fetch skin options:', err.message);
+  }
+  return null;
+}
+
+function randomSkinFromOptions(options) {
+  if (!options) {
+    return { skinId: FALLBACK_SKIN_IDS[Math.floor(Math.random() * FALLBACK_SKIN_IDS.length)] };
+  }
+  return {
+    bodyId: options.bodies[Math.floor(Math.random() * options.bodies.length)],
+    eyesId: options.eyes[Math.floor(Math.random() * options.eyes.length)],
+    mouthId: options.mouths[Math.floor(Math.random() * options.mouths.length)],
+  };
+}
 
 // Each agent gets its own test API key, name, and color
 const AGENTS = [
   { key: 'test_OpenClaw_Test_Bot', name: 'OpenClaw_Test_Bot', color: '#FF6B6B' },
   { key: 'test_FiverrClawOfficial', name: 'FiverrClawOfficial', color: '#45B7D1' },
-  { key: 'test_MonkeNigga', name: 'MonkeNigga', color: '#4ECDC4' },
+  { key: 'test_monke', name: 'monke', color: '#4ECDC4' },
   { key: 'test_Stromfee', name: 'Stromfee', color: '#BB8FCE' },
   { key: 'test_moltscreener', name: 'moltscreener', color: '#F7DC6F' },
 ];
@@ -71,18 +97,20 @@ function checkSelfCollision(myPos, angle, mySegments, checkDistance = 60) {
   return false;
 }
 
-async function runAgent({ key, name, color }) {
+async function runAgent({ key, name, color }, skinOptions) {
   const HEADERS = makeHeaders(key);
   const prefix = `[${name}]`;
 
   console.log(`${prefix} Starting...`);
 
-  // Join match
+  // Join match (random body/eyes/mouth from public/skins per agent)
+  const skin = randomSkinFromOptions(skinOptions);
+  const joinBody = { displayName: name, color, ...skin };
   console.log(`${prefix} Joining match...`);
   const joinRes = await fetch(`${BASE_URL}/api/match/join`, {
     method: 'POST',
     headers: HEADERS,
-    body: JSON.stringify({ displayName: name, color }),
+    body: JSON.stringify(joinBody),
   });
   const join = await joinRes.json();
 
@@ -91,7 +119,8 @@ async function runAgent({ key, name, color }) {
     return;
   }
 
-  console.log(`${prefix} Joined as ${join.playerId} (${color})`);
+  const skinDesc = skin.skinId ? skin.skinId : `${skin.bodyId} + ${skin.eyesId} + ${skin.mouthId}`;
+  console.log(`${prefix} Joined as ${join.playerId} (${color}, skin: ${skinDesc})`);
 
   // Wait for match to start
   console.log(`${prefix} Waiting for match to start...`);
@@ -234,57 +263,20 @@ async function runAgent({ key, name, color }) {
         }
       }
 
-      // Wall avoidance
-      const margin = 100;
-      const lookAhead = 80;
-      const futureX = myPos.x + Math.cos(me.angle * Math.PI / 180) * lookAhead;
-      const futureY = myPos.y + Math.sin(me.angle * Math.PI / 180) * lookAhead;
-
-      let wallDanger = false;
-      if (futureX < margin || futureX > state.arena.width - margin ||
-          futureY < margin || futureY > state.arena.height - margin) {
-        wallDanger = true;
-        const centerX = state.arena.width / 2;
-        const centerY = state.arena.height / 2;
-        targetAngle = getAngleTo(myPos, { x: centerX, y: centerY });
-      }
+      // Walls wrap to the opposite side (classic snake) - no need to avoid them
 
       // Turn control
       let turn = getShortestTurn(me.angle, targetAngle);
       let maxTurn = 20;
-      if (wallDanger || selfDanger) maxTurn = 45;
+      if (selfDanger) maxTurn = 45;
       else if (Math.abs(turn) < 10) maxTurn = 10;
       turn = Math.max(-maxTurn, Math.min(maxTurn, turn));
 
-      // Boost decision with phase-aware strategy
-      let shouldBoost = false;
-
-      const enemyVeryClose = nearestEnemy && nearestEnemyDist < 120;
-      const safeFromBigEnemy = !enemyIsBigger || !enemyVeryClose;
-
-      if (!wallDanger && !selfDanger && me.length > 15 && safeFromBigEnemy) {
-        if (earlyGame) {
-          shouldBoost = minDist < 40 && !enemyVeryClose;
-        } else if (midGame) {
-          shouldBoost =
-            minDist < 60 ||
-            (enemyIsSmaller && enemyVeryClose);
-        } else if (lateGame) {
-          if (isLeader) {
-            shouldBoost = minDist < 30 && !enemyVeryClose;
-          } else {
-            shouldBoost =
-              minDist < 70 ||
-              (enemyIsSmaller && enemyVeryClose);
-          }
-        }
-      }
-
-      // Send action
+      // Send action (boost mechanic removed)
       const actionRes = await fetch(`${BASE_URL}/api/match/action`, {
         method: 'POST',
         headers: HEADERS,
-        body: JSON.stringify({ action: 'steer', angleDelta: turn, boost: shouldBoost }),
+        body: JSON.stringify({ action: 'steer', angleDelta: turn }),
       });
       await actionRes.json(); // ignore body
 
@@ -293,10 +285,7 @@ async function runAgent({ key, name, color }) {
       if (tickCount % 20 === 0 || me.score !== lastScore) {
         const logTime = Math.floor(timeLeft);
         const foodInfo = bestFood ? `Food=${Math.round(minDist)}u` : 'No food';
-        let status = '';
-        if (wallDanger) status = 'WALL';
-        else if (selfDanger) status = 'SELF';
-        else if (shouldBoost) status = 'BOOST';
+        const status = selfDanger ? 'SELF' : '';
         console.log(`${prefix} [${timeLeft}s] score=${me.score} len=${me.length} ${foodInfo} turn=${turn.toFixed(0)} ${status}`);
         lastScore = me.score;
       }
@@ -311,7 +300,8 @@ async function runAgent({ key, name, color }) {
 
 async function main() {
   console.log('Starting multi-agent test (5 agents)...\n');
-  await Promise.all(AGENTS.map(agent => runAgent(agent)));
+  const skinOptions = await fetchSkinOptions();
+  await Promise.all(AGENTS.map(agent => runAgent(agent, skinOptions)));
   console.log('\nMulti-agent test complete.');
 }
 

@@ -2,24 +2,23 @@
 export const ARENA_WIDTH = 2000;
 export const ARENA_HEIGHT = 2000;
 
-// Snake settings
-export const INITIAL_SNAKE_LENGTH = 10;
-export const SNAKE_SEGMENT_SIZE = 21; // Spacing baseline between segments (world units)
-export const NORMAL_SPEED = 10; // Units per tick
-export const BOOST_SPEED = 20; // Units per tick (2x normal)
-export const MIN_LENGTH_TO_BOOST = 5;
-export const BOOST_LENGTH_LOSS_INTERVAL = 500; // ms - lose 1 segment every 0.5s while boosting
+// Snake settings: segment spacing +50% to match larger snake size
+export const INITIAL_SNAKE_LENGTH = 3; // Fewer body parts
+export const SNAKE_SEGMENT_SIZE = 18; // Base spacing for initial placement (12 * 1.5)
+export const SEGMENT_SPACING_FRONT = 54; // Distance between segments near head (36 * 1.5; gap 54-27=27 < head 30)
+export const SEGMENT_SPACING_TAIL = 18; // Distance near tail (12 * 1.5, kept smaller so tail doesn't separate)
+export const NORMAL_SPEED = 10; // Units per tick (boost mechanic removed)
 
 // Food settings
 export const FOOD_VALUE = 10; // Points for eating regular food
-export const DROPPED_FOOD_VALUE = 5; // Points for food dropped from boosting/death
+export const DROPPED_FOOD_VALUE = 5; // Points for food dropped from death
 export const MAX_FOOD_COUNT = 100; // Maintain this many food items in arena
 export const FOOD_SPAWN_MARGIN = 50; // Don't spawn food too close to walls
 
-// Collision settings
-export const HEAD_RADIUS = 13.5; // Collision radius for snake head
-export const SEGMENT_RADIUS = 10.5; // Collision radius for body segments
-export const FOOD_RADIUS = 9; // Collision radius for food
+// Collision: snake radii +50% from previous. Slip-through check: gap = SPACING_FRONT - 2*SEGMENT_RADIUS < 2*HEAD_RADIUS.
+export const HEAD_RADIUS = 15; // Snake head (10 * 1.5)
+export const SEGMENT_RADIUS = 13.5; // Body segments (9 * 1.5); gap 54-27=27 < 30 head diameter
+export const FOOD_RADIUS = 3.375; // 25% smaller than previous 4.5 (visual + collision)
 export const SELF_COLLISION_SKIP = 5; // Skip this many segments when checking self-collision
 
 // Match settings
@@ -35,6 +34,3 @@ export const TICK_INTERVAL = 1000 / TICK_RATE; // ms per tick
 
 // Rate limiting
 export const MAX_ACTIONS_PER_SECOND = 5;
-
-// Kill bonus
-export const KILL_BONUS_PERCENTAGE = 0.5; // Killer gets 50% of victim's score

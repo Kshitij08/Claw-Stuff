@@ -206,7 +206,8 @@ export class MatchManager {
     // Notify spectators (include winner skin + survival time for display)
     if (this.onMatchEndCallback) {
       const winnerEntry = withSurvival[0] ?? null;
-      let winnerWithSkin = winnerEntry
+      type WinnerWithSkin = SpectatorMatchEnd['winner'];
+      let winnerWithSkin: WinnerWithSkin = winnerEntry
         ? { name: winnerEntry.name, score: winnerEntry.score, survivalMs: winnerEntry.survivalMs + WINNER_SURVIVAL_BONUS_MS }
         : null;
       if (winnerWithSkin) {

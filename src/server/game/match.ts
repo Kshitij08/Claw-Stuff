@@ -11,8 +11,11 @@ import {
   TICK_INTERVAL,
 } from '../../shared/constants.js';
 
-// In local/test mode (non-production), skip the 60s lobby countdown
+// In local/test mode (non-production), use a short countdown so house bots have time to join
 const EFFECTIVE_LOBBY_DURATION = process.env.NODE_ENV === 'production' ? LOBBY_DURATION : 0;
+// Minimum wait after 2nd join so that house bots (5) can all join before match starts
+const MIN_LOBBY_WAIT_MS = 5 * 1000;
+const LOBBY_WAIT_MS = Math.max(EFFECTIVE_LOBBY_DURATION, MIN_LOBBY_WAIT_MS);
 
 export class MatchManager {
   private engine: GameEngine;
@@ -311,21 +314,19 @@ export class MatchManager {
     };
     this.players.set(playerId, player);
 
-    // Start countdown when the second bot joins.
+    // Start countdown when the second bot joins (wait at least MIN_LOBBY_WAIT_MS so house bots can join).
     if (isSecond) {
       const now = Date.now();
-      this.currentMatchStartTime = now + EFFECTIVE_LOBBY_DURATION;
-      this.nextMatchStartTime = this.currentMatchStartTime + MATCH_DURATION + RESULTS_DURATION + EFFECTIVE_LOBBY_DURATION;
+      this.currentMatchStartTime = now + LOBBY_WAIT_MS;
+      this.nextMatchStartTime = this.currentMatchStartTime + MATCH_DURATION + RESULTS_DURATION + LOBBY_WAIT_MS;
 
       if (this.lobbyStartTimeout) {
         clearTimeout(this.lobbyStartTimeout);
       }
-      this.lobbyStartTimeout = setTimeout(() => this.startMatch(), EFFECTIVE_LOBBY_DURATION);
+      this.lobbyStartTimeout = setTimeout(() => this.startMatch(), LOBBY_WAIT_MS);
 
       console.log(
-        EFFECTIVE_LOBBY_DURATION > 0
-          ? `Second bot joined lobby for ${match.id}. Match will start in ${EFFECTIVE_LOBBY_DURATION / 1000}s (at ${new Date(this.currentMatchStartTime).toISOString()}).`
-          : `Second bot joined lobby for ${match.id}. Starting match immediately (local test mode).`,
+        `Second bot joined lobby for ${match.id}. Match will start in ${LOBBY_WAIT_MS / 1000}s (at ${new Date(this.currentMatchStartTime).toISOString()}).`,
       );
     } else if (wasFirst) {
       console.log(`First bot joined lobby for ${match.id}. Waiting for another bot to join before countdown.`);

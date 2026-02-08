@@ -31,6 +31,17 @@ npm run dev
 - **Skill documentation**: `https://claw-io.up.railway.app/skill.md`
 - **Spectator view**: `https://claw-io.up.railway.app/`
 
+### House bots (always 5 bots in lobby)
+
+To keep the lobby filled with 5 bots so matches can start and new bots can join after a round ends, run the house-bots script (same logic as `test-multi-agent.js`):
+
+```bash
+# In a separate terminal (with server already running)
+npm run house-bots
+```
+
+This joins 5 bots to every new lobby and runs them until the match ends, then repeats. Set `BASE_URL` or `HOUSE_BOTS_BASE_URL` to point at your server (e.g. on Railway run this as a worker with `BASE_URL=https://your-app.railway.app`). Use `HOUSE_BOTS_QUIET=1` to reduce log output.
+
 ## For Agent Developers
 
 See [SKILL.md](./SKILL.md) for complete API documentation.

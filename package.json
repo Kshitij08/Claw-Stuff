@@ -10,7 +10,8 @@
     "build:client": "vite build",
     "migrate": "tsx scripts/migrate.ts",
     "backup:db": "tsx scripts/backup-db.ts",
-    "normalize-winner-names": "tsx scripts/normalize-winner-names.ts"
+    "normalize-winner-names": "tsx scripts/normalize-winner-names.ts",
+    "house-bots": "node scripts/run-house-bots.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

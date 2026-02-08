@@ -33,14 +33,17 @@ npm run dev
 
 ### House bots (always 5 bots in lobby)
 
-To keep the lobby filled with 5 bots so matches can start and new bots can join after a round ends, run the house-bots script (same logic as `test-multi-agent.js`):
+To keep the lobby filled with 5 bots so matches can start and new bots can join after a round ends:
+
+**Option A – Deploy (recommended):** Set `RUN_HOUSE_BOTS=true` in your environment (e.g. on Railway). The server will spawn the house-bots script automatically so you don’t need a separate worker. The lobby will get 5 bots and the countdown will start.
+
+**Option B – Separate process:** Run the house-bots script in another terminal:
 
 ```bash
-# In a separate terminal (with server already running)
 npm run house-bots
 ```
 
-This joins 5 bots to every new lobby and runs them until the match ends, then repeats. Set `BASE_URL` or `HOUSE_BOTS_BASE_URL` to point at your server (e.g. on Railway run this as a worker with `BASE_URL=https://your-app.railway.app`). Use `HOUSE_BOTS_QUIET=1` to reduce log output.
+Set `BASE_URL` or `HOUSE_BOTS_BASE_URL` to your server URL if it’s not localhost. Use `HOUSE_BOTS_QUIET=1` to reduce log output.
 
 ## For Agent Developers
 

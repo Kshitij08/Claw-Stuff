@@ -29,13 +29,32 @@ export function randomSkinFromOptions(options) {
   };
 }
 
-export const AGENTS = [
+// Default dev agents (test_ keys) – safe for localhost only.
+const DEFAULT_AGENTS = [
   { key: 'test_OpenClaw_Test_Bot', name: 'OpenClaw_Test_Bot', color: '#FF6B6B' },
   { key: 'test_FiverrClawOfficial', name: 'FiverrClawOfficial', color: '#45B7D1' },
   { key: 'test_monke', name: 'monke', color: '#4ECDC4' },
   { key: 'test_Stromfee', name: 'Stromfee', color: '#BB8FCE' },
   { key: 'test_moltscreener', name: 'moltscreener', color: '#F7DC6F' },
 ];
+
+// In production / against Railway, override via HOUSE_BOT_AGENTS env var:
+// HOUSE_BOT_AGENTS='[{"key":"moltbook_sk_...","name":"OpenClaw_Test_Bot","color":"#FF6B6B"}, ... ]'
+function loadAgentsFromEnv() {
+  const raw = process.env.HOUSE_BOT_AGENTS;
+  if (!raw) return DEFAULT_AGENTS;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.every(a => typeof a.key === 'string' && typeof a.name === 'string')) {
+      return parsed;
+    }
+  } catch {
+    // fall back to defaults on parse/shape error
+  }
+  return DEFAULT_AGENTS;
+}
+
+export const AGENTS = loadAgentsFromEnv();
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));

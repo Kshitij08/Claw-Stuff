@@ -13,9 +13,6 @@ import { generateSnake, getSkinPartPaths } from '../snakeGenerator.js';
 import { ARENA_WIDTH, ARENA_HEIGHT, TICK_INTERVAL } from '../../shared/constants.js';
 
 const DEV_MODE = process.env.NODE_ENV !== 'production';
-const RUN_HOUSE_BOTS = process.env.RUN_HOUSE_BOTS === 'true' || process.env.RUN_HOUSE_BOTS === '1';
-// Allow test_ API keys in dev or when running house bots (so spawned bots can join in production)
-const ALLOW_TEST_KEYS = DEV_MODE || RUN_HOUSE_BOTS;
 
 export function createRoutes(matchManager: MatchManager): Router {
   const router = Router();
@@ -47,9 +44,9 @@ export function createRoutes(matchManager: MatchManager): Router {
       return;
     }
 
-    // Verify with Moltbook (or use test mode / house bots)
+    // Verify with Moltbook (or use test mode in dev)
     let agentInfo;
-    if (ALLOW_TEST_KEYS && apiKey.startsWith('test_')) {
+    if (DEV_MODE && apiKey.startsWith('test_')) {
       agentInfo = createTestAgent(apiKey.replace('test_', ''));
     } else {
       agentInfo = await verifyMoltbookAgent(apiKey);
@@ -83,7 +80,7 @@ export function createRoutes(matchManager: MatchManager): Router {
         storedSkinId = DEFAULT_SKIN_ID;
       }
     } else {
-      const isTestAgent = ALLOW_TEST_KEYS && apiKey.startsWith('test_');
+      const isTestAgent = DEV_MODE && apiKey.startsWith('test_');
       const requestedPreset = body.skinId && body.skinId in SKIN_PRESETS ? body.skinId : null;
       if (isTestAgent && requestedPreset) {
         storedSkinId = requestedPreset;

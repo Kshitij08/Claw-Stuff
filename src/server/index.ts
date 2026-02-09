@@ -3,7 +3,6 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import cors from 'cors';
-import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
@@ -103,20 +102,6 @@ httpServer.listen(PORT, () => {
   matchManager.start().catch((err) => {
     console.error('Failed to start match manager:', err);
   });
-
-  // When RUN_HOUSE_BOTS is set, spawn the house-bots script so the lobby always has 5 bots (no separate process needed on deploy)
-  const runHouseBots = process.env.RUN_HOUSE_BOTS === 'true' || process.env.RUN_HOUSE_BOTS === '1';
-  if (runHouseBots) {
-    const scriptPath = join(process.cwd(), 'scripts', 'run-house-bots.js');
-    const houseBotsUrl = process.env.HOUSE_BOTS_BASE_URL || process.env.BASE_URL || `http://127.0.0.1:${PORT}`;
-    const child = spawn(process.execPath, [scriptPath], {
-      env: { ...process.env, BASE_URL: houseBotsUrl, HOUSE_BOTS_QUIET: '1' },
-      stdio: 'inherit',
-    });
-    child.on('error', (err) => console.error('[House bots] Failed to start:', err));
-    child.on('exit', (code) => console.warn('[House bots] Exited with code', code));
-    console.log(`[House bots] Started (BASE_URL=${houseBotsUrl})`);
-  }
 });
 
 // Graceful shutdown

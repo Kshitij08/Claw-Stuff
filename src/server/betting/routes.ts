@@ -36,7 +36,9 @@ export function createBettingRoutes(): Router {
       res.status(401).json({ success: false, error: 'INVALID_API_KEY', message: 'Invalid Moltbook API key' });
       return null;
     }
-    return agentInfo;
+    // Attach the apiKey we authenticated with so downstream logic can
+    // disambiguate agents that share the same display name.
+    return { ...agentInfo, apiKey };
   };
 
   // ── GET /api/betting/contract-info ───────────────────────────────────
@@ -75,7 +77,7 @@ export function createBettingRoutes(): Router {
       return;
     }
 
-    const ok = await bettingService.registerAgentWallet(agent.name, walletAddress);
+    const ok = await bettingService.registerAgentWallet(agent.name, agent.apiKey, walletAddress);
     if (ok) {
       res.json({ success: true, message: `Wallet ${walletAddress} linked to agent ${agent.name}` });
     } else {
@@ -107,8 +109,9 @@ export function createBettingRoutes(): Router {
       return;
     }
 
-    // Get agent's registered wallet address (the one that paid for the tx).
-    const walletAddress = await bettingService.getAgentWallet(agent.name);
+    // Get agent's registered wallet address (the one that paid for the tx),
+    // using both name and Moltbook API key to uniquely identify the agent.
+    const walletAddress = await bettingService.getAgentWallet(agent.name, agent.apiKey);
     if (!walletAddress) {
       res.status(400).json({
         success: false,
@@ -163,7 +166,7 @@ export function createBettingRoutes(): Router {
       return;
     }
 
-    const walletAddress = await bettingService.getAgentWallet(agent.name);
+    const walletAddress = await bettingService.getAgentWallet(agent.name, agent.apiKey);
     if (!walletAddress) {
       res.status(400).json({ success: false, error: 'NO_WALLET', message: 'No wallet registered' });
       return;
@@ -183,7 +186,7 @@ export function createBettingRoutes(): Router {
     const agent = await authenticateAgent(req, res);
     if (!agent) return;
 
-    const walletAddress = await bettingService.getAgentWallet(agent.name);
+    const walletAddress = await bettingService.getAgentWallet(agent.name, agent.apiKey);
     if (!walletAddress) {
       res.json({ bets: [] });
       return;

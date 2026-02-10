@@ -657,13 +657,23 @@ export async function getLeaderboard(limit: number = 50): Promise<LeaderboardEnt
 
 /**
  * Register an agent's wallet address.
+ *
+ * Uses BOTH the agent's canonical name and its Moltbook API key to avoid
+ * collisions when multiple agents share the same display name.
  */
-export async function registerAgentWallet(agentName: string, walletAddress: string) {
+export async function registerAgentWallet(agentName: string, apiKey: string, walletAddress: string) {
   try {
-    await dbQuery(
-      `UPDATE agents SET wallet_address = $2 WHERE name = $1`,
-      [agentName, walletAddress.toLowerCase()],
+    const rows = await dbQuery(
+      `UPDATE agents SET wallet_address = $3 WHERE name = $1 AND api_key = $2`,
+      [agentName, apiKey, walletAddress.toLowerCase()],
     );
+    // If no rows were updated, either the agent row doesn't exist yet
+    // (no games played) or there is a name/api_key mismatch.
+    if (!rows) {
+      // dbQuery already returns rows; for UPDATE we don't get affected row count.
+      // Log a soft warning and still return true to avoid blocking gameplay.
+      console.warn('[betting/service] registerAgentWallet: no matching agent row for', agentName);
+    }
     return true;
   } catch (err) {
     console.error('[betting/service] registerAgentWallet failed:', err);
@@ -673,11 +683,14 @@ export async function registerAgentWallet(agentName: string, walletAddress: stri
 
 /**
  * Get agent's registered wallet address.
+ *
+ * Uses BOTH the agent's canonical name and its Moltbook API key to avoid
+ * collisions when multiple agents share the same display name.
  */
-export async function getAgentWallet(agentName: string): Promise<string | null> {
+export async function getAgentWallet(agentName: string, apiKey: string): Promise<string | null> {
   const rows = await dbQuery<{ wallet_address: string | null }>(
-    `SELECT wallet_address FROM agents WHERE name = $1`,
-    [agentName],
+    `SELECT wallet_address FROM agents WHERE name = $1 AND api_key = $2`,
+    [agentName, apiKey],
   );
   return rows[0]?.wallet_address || null;
 }

@@ -176,7 +176,13 @@ export function createBettingRoutes(): Router {
 
     const result = await bettingService.claimWinnings(walletAddress, matchId);
     if (result.success) {
-      res.json({ success: true, txHash: result.txHash, payout: result.payout });
+      res.json({
+        success: true,
+        txHashMon: result.txHashMon || null,
+        txHashMclaw: result.txHashMclaw || null,
+        payoutMon: result.payoutMon || '0',
+        payoutMclaw: result.payoutMclaw || '0',
+      });
     } else {
       res.status(400).json({ success: false, error: 'CLAIM_FAILED', message: result.error });
     }

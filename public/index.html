@@ -350,8 +350,7 @@
                 <button onclick="switchTab('participate')" id="tab-btn-participate" class="flex-1 py-2 text-xs md:text-sm nav-neo active">PLAY</button>
                 <button onclick="switchTab('skins')" id="tab-btn-skins" class="flex-1 py-2 text-xs md:text-sm nav-neo">SKINS</button>
                 <button onclick="switchTab('market')" id="tab-btn-market" class="flex-1 py-2 text-xs md:text-sm nav-neo">BETS</button>
-                <!-- TOKEN tab temporarily disabled until new token is launched -->
-                <!-- <button onclick="switchTab('token')" id="tab-btn-token" class="flex-1 py-2 text-xs md:text-sm nav-neo">TOKEN</button> -->
+                <button onclick="switchTab('token')" id="tab-btn-token" class="flex-1 py-2 text-xs md:text-sm nav-neo">TOKEN</button>
             </div>
 
             <div class="flex-1 overflow-y-auto p-4 custom-scrollbar relative">
@@ -566,7 +565,7 @@
 
                 </div>
 
-                <!-- ========== TOKEN TAB (disabled until new token launch) ========== -->
+                <!-- ========== TOKEN TAB ========== -->
                 <div id="panel-token" class="hidden space-y-5">
                     <div class="bg-slate-800 p-4 border-2 border-white shadow-[4px_4px_0_black]">
                         <div class="flex items-center gap-3 mb-4">
@@ -574,7 +573,7 @@
                                 <span class="text-black font-black text-2xl">$</span>
                             </div>
                             <div>
-                                <h2 class="text-2xl neo-font text-white leading-none tracking-wide">$CLAWIO</h2>
+                                <h2 class="text-2xl neo-font text-white leading-none tracking-wide">$MClawIO (Monad)</h2>
                                 <span class="text-xs font-bold text-lime-400 bg-lime-400/10 px-2 py-0.5 rounded border border-lime-400/30" id="token-24h">-- (24h)</span>
                             </div>
                         </div>
@@ -591,18 +590,18 @@
                         </div>
 
                         <div class="mb-4">
-                            <div class="text-[10px] text-slate-400 uppercase font-bold mb-1 tracking-wider">Contract Address (CA)</div>
+                            <div class="text-[10px] text-slate-400 uppercase font-bold mb-1 tracking-wider">Contract Address (Monad CA)</div>
                             <div class="flex gap-2">
-                                <div class="flex-1 bg-slate-900 border border-white/20 text-[10px] p-2 font-mono text-slate-300 truncate rounded cursor-pointer hover:bg-slate-800 transition-colors" title="Click to copy" id="token-ca-display">0x059...B07</div>
+                                <div class="flex-1 bg-slate-900 border border-white/20 text-[10px] p-2 font-mono text-slate-300 truncate rounded cursor-pointer hover:bg-slate-800 transition-colors" title="Click to copy" id="token-ca-display">0x2681...777</div>
                                 <button type="button" class="copy-btn px-3 bg-slate-700 border border-white/20 hover:bg-white hover:text-black hover:border-white transition-colors rounded" data-copy="token-ca" title="Copy full address">
                                     <i data-lucide="copy" class="w-4 h-4"></i>
                                 </button>
                             </div>
-                            <textarea id="token-ca" class="hidden">0x059FE0feB6ED3868D4D3315a706319b1D69b3B07</textarea>
+                            <textarea id="token-ca" class="hidden">0x26813a9B80f43f98cee9045B9f7CdcA816C57777</textarea>
                         </div>
 
-                        <a href="https://www.clanker.world/clanker/0x059FE0feB6ED3868D4D3315a706319b1D69b3B07" target="_blank" rel="noopener noreferrer" class="btn-neo btn-yellow w-full text-center block hover:brightness-110">
-                            Buy $CLAWIO
+                        <a href="https://nad.fun/tokens/0x26813a9B80f43f98cee9045B9f7CdcA816C57777" target="_blank" rel="noopener noreferrer" class="btn-neo btn-yellow w-full text-center block hover:brightness-110">
+                            Buy $MClawIO
                         </a>
                     </div>
 
@@ -611,7 +610,7 @@
                             <i data-lucide="zap" class="w-4 h-4"></i> Utility
                         </h3>
                         <p class="text-xs text-slate-300 leading-relaxed font-medium">
-                            Claw IO is powered by <span class="text-[#facc15] font-bold">$ClawIO</span>. Use tokens to mint exclusive <span class="text-[#22d3ee] font-bold">Agent Skins (NFTs)</span> and place bets on live matches.
+                            Claw IO is powered by <span class="text-[#facc15] font-bold">$MClawIO</span> on Monad. Use tokens to mint exclusive <span class="text-[#22d3ee] font-bold">Agent Skins (NFTs)</span> and place bets on live matches.
                         </p>
                     </div>
 
@@ -732,8 +731,7 @@
         lucide.createIcons();
 
         function switchTab(tabId) {
-            // TOKEN tab temporarily removed from navigation until new token address is available
-            ['participate', 'skins', 'market'].forEach(id => {
+            ['participate', 'skins', 'market', 'token'].forEach(id => {
                 const panel = document.getElementById(`panel-${id}`);
                 const btn = document.getElementById(`tab-btn-${id}`);
                 if (panel) panel.classList.add('hidden');
@@ -753,13 +751,13 @@
             }
         });
 
-        // Token stats: GeckoTerminal (Base) – pool: https://www.geckoterminal.com/base/pools/0xd6b9539cd417084d0536cb9403921a538afae3b48d1856d05b44088aa55d0666
+        // Token stats: placeholder until $MClawIO pool data on Monad is available.
         (function loadTokenStats() {
-            const POOL_ID = '0xd6b9539cd417084d0536cb9403921a538afae3b48d1856d05b44088aa55d0666';
+            const POOL_ID = '';
             const mcapEl = document.getElementById('token-mcap');
             const priceEl = document.getElementById('token-price');
             const changeEl = document.getElementById('token-24h');
-            if (!mcapEl || !priceEl || !changeEl) return;
+            if (!mcapEl || !priceEl || !changeEl || !POOL_ID) return;
 
             function formatUsd(n) {
                 if (n == null || isNaN(n)) return '--';

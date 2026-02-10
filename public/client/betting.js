@@ -2,7 +2,7 @@
  * Claw IO – Betting / Prediction Market frontend logic.
  *
  * Handles:
- *  - MetaMask / injected wallet connection (Monad testnet)
+ *  - MetaMask / injected wallet connection (Monad mainnet)
  *  - Placing bets on-chain via ClawBetting contract
  *  - Real-time odds updates via WebSocket
  *  - Toast notifications
@@ -21,12 +21,12 @@ let contractABI = [];
 let currentBettingStatus = null; // latest BettingStatus from server
 let currentMatchId = null;
 
-const MONAD_TESTNET = {
-  chainId: '0x279f',          // 10143
-  chainName: 'Monad Testnet',
-  rpcUrls: ['https://testnet-rpc.monad.xyz'],
+const MONAD_MAINNET = {
+  chainId: '0x8f',            // 143
+  chainName: 'Monad',
+  rpcUrls: ['https://rpc.monad.xyz'],
   nativeCurrency: { name: 'MON', symbol: 'MON', decimals: 18 },
-  blockExplorerUrls: ['https://testnet.monadexplorer.com'],
+  blockExplorerUrls: ['https://monadvision.com'],
 };
 
 /* ================================================================
@@ -75,13 +75,13 @@ window.connectWallet = async function connectWallet() {
     try {
       await window.ethereum.request({
         method: 'wallet_switchEthereumChain',
-        params: [{ chainId: MONAD_TESTNET.chainId }],
+        params: [{ chainId: MONAD_MAINNET.chainId }],
       });
     } catch (switchErr) {
       if (switchErr.code === 4902) {
         await window.ethereum.request({
           method: 'wallet_addEthereumChain',
-          params: [MONAD_TESTNET],
+          params: [MONAD_MAINNET],
         });
       } else {
         throw switchErr;
@@ -483,7 +483,7 @@ async function fetchMyBets(matchId) {
               <span class="text-xs font-black text-[#facc15] uppercase">${escHtml(b.agentName)}</span>
               <span class="text-xs text-slate-400 ml-2">${amtMON} MON</span>
             </div>
-            ${b.txHash ? `<a href="https://testnet.monadexplorer.com/tx/${b.txHash}" target="_blank" class="text-[10px] text-[#22d3ee] font-mono hover:underline">${b.txHash.slice(0,8)}...</a>` : ''}
+            ${b.txHash ? `<a href="https://monadvision.com/tx/${b.txHash}" target="_blank" class="text-[10px] text-[#22d3ee] font-mono hover:underline">${b.txHash.slice(0,8)}...</a>` : ''}
           </div>
         `;
       }).join('');

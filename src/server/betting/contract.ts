@@ -1,5 +1,5 @@
 /**
- * Ethers.js wrapper for the ClawBetting smart contract on Monad testnet.
+ * Ethers.js wrapper for the ClawBetting smart contract on Monad mainnet.
  * All write functions are called by the backend "operator" wallet.
  */
 import { ethers, JsonRpcProvider, Wallet, Contract, encodeBytes32String, decodeBytes32String } from 'ethers';
@@ -21,7 +21,8 @@ try {
 }
 
 // ── Config from env ────────────────────────────────────────────────────
-const MONAD_RPC_URL = process.env.MONAD_RPC_URL || 'https://testnet-rpc.monad.xyz';
+// Default to Monad mainnet RPC; can be overridden via MONAD_RPC_URL.
+const MONAD_RPC_URL = process.env.MONAD_RPC_URL || 'https://rpc.monad.xyz';
 const OPERATOR_PRIVATE_KEY = process.env.OPERATOR_PRIVATE_KEY || '';
 const BETTING_CONTRACT_ADDRESS = process.env.BETTING_CONTRACT_ADDRESS || '';
 
@@ -83,9 +84,9 @@ export function getContractABI(): any[] {
 
 export function getChainInfo() {
   return {
-    chainId: 10143,
+    chainId: 143,
     rpcUrl: MONAD_RPC_URL,
-    explorer: 'https://testnet.monadexplorer.com',
+    explorer: 'https://monadvision.com',
     currency: 'MON',
   };
 }

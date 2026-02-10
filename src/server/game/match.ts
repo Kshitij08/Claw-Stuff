@@ -229,9 +229,15 @@ export class MatchManager {
     const finalScores = withSurvival.map(({ name, score, kills }) => ({ name, score, kills }));
     // Map display name -> canonical agent name for DB (leaderboard uses agent_name)
     const displayNameToAgent = new Map<string, string>();
+    // Also map canonical agent name -> Moltbook API key (for agent reward wallet lookup)
+    const agentNameToApiKey = new Map<string, string>();
     for (const snake of match.snakes.values()) {
-      const agentName = this.players.get(snake.id)?.agentInfo.name ?? snake.name;
+      const player = this.players.get(snake.id);
+      const agentName = player?.agentInfo.name ?? snake.name;
       displayNameToAgent.set(snake.name, agentName);
+      if (player?.apiKey) {
+        agentNameToApiKey.set(agentName, player.apiKey);
+      }
     }
     const finalScoresForDb = finalScores.map(({ name, score, kills }) => ({
       agentName: displayNameToAgent.get(name) ?? name,
@@ -296,9 +302,11 @@ export class MatchManager {
     const isDraw = winners.length > 1;
     const winnerAgentNames = winners.map(w => displayNameToAgent.get(w.name) ?? w.name);
     // Look up wallet addresses for winner agents (best-effort, may be null)
-    const winnerWalletPromises = winnerAgentNames.map(name =>
-      bettingService.getAgentWallet(name).catch(() => null),
-    );
+    const winnerWalletPromises = winnerAgentNames.map(name => {
+      const apiKey = agentNameToApiKey.get(name);
+      if (!apiKey) return Promise.resolve(null);
+      return bettingService.getAgentWallet(name, apiKey).catch(() => null);
+    });
     Promise.all(winnerWalletPromises).then(wallets => {
       const winnerAgentWallets = wallets.map(w => w || '0x0000000000000000000000000000000000000000');
       bettingService.resolveMatchBetting({

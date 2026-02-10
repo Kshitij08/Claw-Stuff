@@ -7,6 +7,8 @@ import * as chain from './contract.js';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
+export type Token = 'MON' | 'MCLAW';
+
 export interface AgentOdds {
   agentName: string;
   pool: string;          // wei string
@@ -19,6 +21,7 @@ export interface AgentOdds {
 export interface BettingStatus {
   matchId: string;
   status: 'open' | 'closed' | 'resolved' | 'cancelled' | 'none';
+  token: Token;
   totalPool: string;
   totalPoolMON: string;
   agents: AgentOdds[];
@@ -33,6 +36,7 @@ export interface BetRecord {
   bettorName: string | null;
   agentName: string;
   amount: string;
+  token: Token;
   txHash: string | null;
   placedAt: string;
 }
@@ -150,9 +154,19 @@ export async function placeBet(opts: {
   matchId: string;
   agentName: string;
   amountWei: string;
+  token?: Token;      // MON (default) or MCLAW
   txHash?: string;    // already have a tx hash (human placed directly)
 }): Promise<{ success: boolean; txHash?: string; error?: string }> {
-  const { bettorAddress, bettorType, bettorName, matchId, agentName, amountWei, txHash } = opts;
+  const {
+    bettorAddress,
+    bettorType,
+    bettorName,
+    matchId,
+    agentName,
+    amountWei,
+    token = 'MON',
+    txHash,
+  } = opts;
 
   // Validate pool exists and is in a valid state for recording bets
   const poolRows = await dbQuery<{ status: string }>(
@@ -183,25 +197,27 @@ export async function placeBet(opts: {
   // Record bet in DB
   try {
     await dbQuery(
-      `INSERT INTO bets (match_id, bettor_address, bettor_type, bettor_name, agent_name, amount, tx_hash)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [matchId, bettorAddress.toLowerCase(), bettorType, bettorName, agentName, amountWei, finalTxHash],
+      `INSERT INTO bets (match_id, bettor_address, bettor_type, bettor_name, agent_name, amount, tx_hash, token)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [matchId, bettorAddress.toLowerCase(), bettorType, bettorName, agentName, amountWei, finalTxHash, token],
     );
 
-    // Update pool total
-    await dbQuery(
-      `UPDATE betting_pools SET total_pool = total_pool + $2 WHERE match_id = $1`,
-      [matchId, amountWei],
-    );
+    // For backwards compatibility, keep betting_pools.total_pool as MON-only.
+    if (token === 'MON') {
+      await dbQuery(
+        `UPDATE betting_pools SET total_pool = total_pool + $2 WHERE match_id = $1`,
+        [matchId, amountWei],
+      );
+    }
 
     // Update leaderboard
-    await updateLeaderboard(bettorAddress, bettorName, amountWei);
+    await updateLeaderboard(bettorAddress, bettorName, amountWei, token);
   } catch (err) {
     console.error('[betting/service] DB placeBet failed:', err);
   }
 
   // Emit real-time update
-  const status = await getBettingStatus(matchId);
+  const status = await getBettingStatus(matchId, token);
   emit('bettingUpdate', status);
   emit('betPlaced', {
     matchId,
@@ -211,6 +227,7 @@ export async function placeBet(opts: {
     agentName,
     amount: amountWei,
     amountMON: weiToMON(amountWei),
+    token,
   });
 
   return { success: true, txHash: finalTxHash || undefined };
@@ -354,39 +371,79 @@ export async function resolveMatchBetting(opts: {
 /**
  * Claim winnings (backend calls claimFor on-chain for agents).
  */
-export async function claimWinnings(bettorAddress: string, matchId: string): Promise<{ success: boolean; txHash?: string; payout?: string; error?: string }> {
-  // Check claimable amount from contract
-  const claimable = await chain.getClaimableAmount(matchId, bettorAddress);
-  if (claimable === '0') {
+export async function claimWinnings(
+  bettorAddress: string,
+  matchId: string,
+): Promise<{ success: boolean; txHashMon?: string; txHashMclaw?: string; payoutMon?: string; payoutMclaw?: string; error?: string }> {
+  // Check claimable amounts from contract (MON and MCLAW)
+  const { monAmount, mclawAmount } = await chain.getClaimableAmounts(matchId, bettorAddress);
+  const hasMon = monAmount !== '0';
+  const hasMclaw = mclawAmount !== '0';
+
+  if (!hasMon && !hasMclaw) {
     return { success: false, error: 'Nothing to claim' };
   }
 
-  const txHash = await chain.claimFor(bettorAddress, matchId);
-  if (!txHash) {
+  let txHashMon: string | undefined;
+  let txHashMclaw: string | undefined;
+
+  // Claim MON (via operator) if any
+  if (hasMon) {
+    txHashMon = await chain.claimFor(bettorAddress, matchId) || undefined;
+    if (txHashMon) {
+      try {
+        await dbQuery(
+          `INSERT INTO bet_settlements (match_id, bettor_address, payout_amount, claim_tx_hash, token)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [matchId, bettorAddress.toLowerCase(), monAmount, txHashMon, 'MON'],
+        );
+        await dbQuery(
+          `UPDATE betting_leaderboard SET
+             total_wins = total_wins + 1,
+             total_payout = total_payout + $2
+           WHERE bettor_address = $1`,
+          [bettorAddress.toLowerCase(), monAmount],
+        );
+      } catch (err) {
+        console.error('[betting/service] DB claimWinnings MON failed:', err);
+      }
+    }
+  }
+
+  // Claim MCLAW (via operator) if any
+  if (hasMclaw) {
+    txHashMclaw = await chain.claimMclawFor(bettorAddress, matchId) || undefined;
+    if (txHashMclaw) {
+      try {
+        await dbQuery(
+          `INSERT INTO bet_settlements (match_id, bettor_address, payout_amount, claim_tx_hash, token)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [matchId, bettorAddress.toLowerCase(), mclawAmount, txHashMclaw, 'MCLAW'],
+        );
+        await dbQuery(
+          `UPDATE betting_leaderboard SET
+             total_wins = total_wins + 1,
+             total_payout = total_payout + $2
+           WHERE bettor_address = $1`,
+          [bettorAddress.toLowerCase(), mclawAmount],
+        );
+      } catch (err) {
+        console.error('[betting/service] DB claimWinnings MCLAW failed:', err);
+      }
+    }
+  }
+
+  if (!txHashMon && !txHashMclaw) {
     return { success: false, error: 'Claim transaction failed' };
   }
 
-  // Record settlement
-  try {
-    await dbQuery(
-      `INSERT INTO bet_settlements (match_id, bettor_address, payout_amount, claim_tx_hash)
-       VALUES ($1, $2, $3, $4)`,
-      [matchId, bettorAddress.toLowerCase(), claimable, txHash],
-    );
-
-    // Update leaderboard wins + payout
-    await dbQuery(
-      `UPDATE betting_leaderboard SET
-         total_wins = total_wins + 1,
-         total_payout = total_payout + $2
-       WHERE bettor_address = $1`,
-      [bettorAddress.toLowerCase(), claimable],
-    );
-  } catch (err) {
-    console.error('[betting/service] DB claimWinnings failed:', err);
-  }
-
-  return { success: true, txHash, payout: claimable };
+  return {
+    success: true,
+    txHashMon,
+    txHashMclaw,
+    payoutMon: hasMon ? monAmount : undefined,
+    payoutMclaw: hasMclaw ? mclawAmount : undefined,
+  };
 }
 
 /**
@@ -394,7 +451,7 @@ export async function claimWinnings(bettorAddress: string, matchId: string): Pro
  * Called after resolveMatch – claims on behalf of each winner via the operator wallet.
  */
 async function autoDistributeWinnings(matchId: string, winnerAgentNames: string[]) {
-  // Get all unique bettor addresses that bet on any winning agent
+  // Get all unique bettor addresses that bet on any winning agent (any token)
   const winningBettors = await dbQuery<{ bettor_address: string }>(
     `SELECT DISTINCT bettor_address FROM bets
      WHERE match_id = $1 AND agent_name = ANY($2)`,
@@ -408,46 +465,83 @@ async function autoDistributeWinnings(matchId: string, winnerAgentNames: string[
   for (const row of winningBettors) {
     const addr = row.bettor_address;
     try {
-      const claimable = await chain.getClaimableAmount(matchId, addr);
-      if (claimable === '0') {
+      const { monAmount, mclawAmount } = await chain.getClaimableAmounts(matchId, addr);
+      const hasMon = monAmount !== '0';
+      const hasMclaw = mclawAmount !== '0';
+      if (!hasMon && !hasMclaw) {
         console.log(`[betting/service] ${addr} has nothing to claim for ${matchId}, skipping`);
         continue;
       }
 
-      const txHash = await chain.claimFor(addr, matchId);
-      if (!txHash) {
-        console.error(`[betting/service] claimFor(${addr}, ${matchId}) tx failed`);
-        continue;
+      // Claim MON if any
+      if (hasMon) {
+        const txHashMon = await chain.claimFor(addr, matchId);
+        if (!txHashMon) {
+          console.error(`[betting/service] claimFor(${addr}, ${matchId}) MON tx failed`);
+        } else {
+          console.log(`[betting/service] Auto-claimed ${weiToMON(monAmount)} MON for ${addr} (tx: ${txHashMon})`);
+          try {
+            await dbQuery(
+              `INSERT INTO bet_settlements (match_id, bettor_address, payout_amount, claim_tx_hash, token)
+               VALUES ($1, $2, $3, $4, $5)`,
+              [matchId, addr, monAmount, txHashMon, 'MON'],
+            );
+            await dbQuery(
+              `UPDATE betting_leaderboard SET
+                 total_wins = total_wins + 1,
+                 total_payout = total_payout + $2
+               WHERE bettor_address = $1`,
+              [addr, monAmount],
+            );
+          } catch (dbErr) {
+            console.error(`[betting/service] DB settlement record failed for ${addr} (MON):`, dbErr);
+          }
+
+          emit('winningsDistributed', {
+            matchId,
+            bettorAddress: addr,
+            payout: monAmount,
+            payoutMON: weiToMON(monAmount),
+            txHash: txHashMon,
+            token: 'MON',
+          });
+        }
       }
 
-      console.log(`[betting/service] Auto-claimed ${weiToMON(claimable)} MON for ${addr} (tx: ${txHash})`);
+      // Claim MCLAW if any
+      if (hasMclaw) {
+        const txHashMclaw = await chain.claimMclawFor(addr, matchId);
+        if (!txHashMclaw) {
+          console.error(`[betting/service] claimMclawFor(${addr}, ${matchId}) MCLAW tx failed`);
+        } else {
+          console.log(`[betting/service] Auto-claimed ${weiToMON(mclawAmount)} MCLAW for ${addr} (tx: ${txHashMclaw})`);
+          try {
+            await dbQuery(
+              `INSERT INTO bet_settlements (match_id, bettor_address, payout_amount, claim_tx_hash, token)
+               VALUES ($1, $2, $3, $4, $5)`,
+              [matchId, addr, mclawAmount, txHashMclaw, 'MCLAW'],
+            );
+            await dbQuery(
+              `UPDATE betting_leaderboard SET
+                 total_wins = total_wins + 1,
+                 total_payout = total_payout + $2
+               WHERE bettor_address = $1`,
+              [addr, mclawAmount],
+            );
+          } catch (dbErr) {
+            console.error(`[betting/service] DB settlement record failed for ${addr} (MCLAW):`, dbErr);
+          }
 
-      // Record settlement in DB
-      try {
-        await dbQuery(
-          `INSERT INTO bet_settlements (match_id, bettor_address, payout_amount, claim_tx_hash)
-           VALUES ($1, $2, $3, $4)`,
-          [matchId, addr, claimable, txHash],
-        );
-        await dbQuery(
-          `UPDATE betting_leaderboard SET
-             total_wins = total_wins + 1,
-             total_payout = total_payout + $2
-           WHERE bettor_address = $1`,
-          [addr, claimable],
-        );
-      } catch (dbErr) {
-        console.error(`[betting/service] DB settlement record failed for ${addr}:`, dbErr);
+          emit('winningsDistributed', {
+            matchId,
+            bettorAddress: addr,
+            payout: mclawAmount,
+            payoutMON: weiToMON(mclawAmount),
+            txHash: txHashMclaw,
+            token: 'MCLAW',
+          });
+        }
       }
-
-      // Notify frontend
-      emit('winningsDistributed', {
-        matchId,
-        bettorAddress: addr,
-        payout: claimable,
-        payoutMON: weiToMON(claimable),
-        txHash,
-      });
     } catch (err) {
       console.error(`[betting/service] autoDistribute for ${addr} failed:`, err);
     }
@@ -459,18 +553,25 @@ async function autoDistributeWinnings(matchId: string, winnerAgentNames: string[
 /**
  * Get betting status with live odds for each agent.
  */
-export async function getBettingStatus(matchId: string): Promise<BettingStatus> {
-  const poolRows = await dbQuery<{ total_pool: string; status: string; agent_names: string[] | null }>(
-    `SELECT total_pool, status, agent_names FROM betting_pools WHERE match_id = $1`,
+export async function getBettingStatus(matchId: string, token: Token = 'MON'): Promise<BettingStatus> {
+  // agent_names and base status still come from betting_pools (match-level metadata)
+  const poolRows = await dbQuery<{ status: string; agent_names: string[] | null }>(
+    `SELECT status, agent_names FROM betting_pools WHERE match_id = $1`,
     [matchId],
   );
 
   if (!poolRows.length) {
-    return { matchId, status: 'none', totalPool: '0', totalPoolMON: '0', agents: [], bettorCount: 0 };
+    return { matchId, status: 'none', token, totalPool: '0', totalPoolMON: '0', agents: [], bettorCount: 0 };
   }
 
-  const { total_pool, status, agent_names } = poolRows[0];
-  const totalPool = BigInt(total_pool || '0');
+  const { status, agent_names } = poolRows[0];
+
+  // Compute total pool per token from bets table (source of truth for multi-token)
+  const totalPoolRows = await dbQuery<{ total: string }>(
+    `SELECT COALESCE(SUM(amount), 0)::text AS total FROM bets WHERE match_id = $1 AND token = $2`,
+    [matchId, token],
+  );
+  const totalPool = BigInt(totalPoolRows[0]?.total || '0');
   const allAgentNames: string[] = agent_names || [];
 
   // Fallback: merge in agents from the contract (in case DB had a race and only has 2)
@@ -485,8 +586,8 @@ export async function getBettingStatus(matchId: string): Promise<BettingStatus> 
   // Per-agent pools and bettor counts (from actual bets)
   const agentRows = await dbQuery<{ agent_name: string; pool: string; bettors: string }>(
     `SELECT agent_name, SUM(amount)::text AS pool, COUNT(DISTINCT bettor_address)::text AS bettors
-     FROM bets WHERE match_id = $1 GROUP BY agent_name`,
-    [matchId],
+     FROM bets WHERE match_id = $1 AND token = $2 GROUP BY agent_name`,
+    [matchId, token],
   );
 
   // Build a map of agent bet data
@@ -518,14 +619,15 @@ export async function getBettingStatus(matchId: string): Promise<BettingStatus> 
   });
 
   const totalBettorRows = await dbQuery<{ cnt: string }>(
-    `SELECT COUNT(DISTINCT bettor_address)::text AS cnt FROM bets WHERE match_id = $1`,
-    [matchId],
+    `SELECT COUNT(DISTINCT bettor_address)::text AS cnt FROM bets WHERE match_id = $1 AND token = $2`,
+    [matchId, token],
   );
   const bettorCount = parseInt(totalBettorRows[0]?.cnt || '0', 10);
 
   return {
     matchId,
     status: status as BettingStatus['status'],
+    token,
     totalPool: totalPool.toString(),
     totalPoolMON: weiToMON(totalPool.toString()),
     agents,
@@ -534,21 +636,39 @@ export async function getBettingStatus(matchId: string): Promise<BettingStatus> 
 }
 
 /**
- * Get a user's bets, optionally filtered by match.
+ * Get a user's bets, optionally filtered by match and token.
  */
-export async function getUserBets(bettorAddress: string, matchId?: string): Promise<BetRecord[]> {
+export async function getUserBets(
+  bettorAddress: string,
+  matchId?: string,
+  token?: Token,
+): Promise<BetRecord[]> {
   const addr = bettorAddress.toLowerCase();
   let rows: any[];
   if (matchId) {
-    rows = await dbQuery(
-      `SELECT * FROM bets WHERE bettor_address = $1 AND match_id = $2 ORDER BY placed_at DESC`,
-      [addr, matchId],
-    );
+    if (token) {
+      rows = await dbQuery(
+        `SELECT * FROM bets WHERE bettor_address = $1 AND match_id = $2 AND token = $3 ORDER BY placed_at DESC`,
+        [addr, matchId, token],
+      );
+    } else {
+      rows = await dbQuery(
+        `SELECT * FROM bets WHERE bettor_address = $1 AND match_id = $2 ORDER BY placed_at DESC`,
+        [addr, matchId],
+      );
+    }
   } else {
-    rows = await dbQuery(
-      `SELECT * FROM bets WHERE bettor_address = $1 ORDER BY placed_at DESC LIMIT 100`,
-      [addr],
-    );
+    if (token) {
+      rows = await dbQuery(
+        `SELECT * FROM bets WHERE bettor_address = $1 AND token = $2 ORDER BY placed_at DESC LIMIT 100`,
+        [addr, token],
+      );
+    } else {
+      rows = await dbQuery(
+        `SELECT * FROM bets WHERE bettor_address = $1 ORDER BY placed_at DESC LIMIT 100`,
+        [addr],
+      );
+    }
   }
 
   return rows.map((r: any) => ({
@@ -559,6 +679,7 @@ export async function getUserBets(bettorAddress: string, matchId?: string): Prom
     bettorName: r.bettor_name,
     agentName: r.agent_name,
     amount: r.amount,
+    token: r.token,
     txHash: r.tx_hash,
     placedAt: r.placed_at,
   }));
@@ -566,32 +687,41 @@ export async function getUserBets(bettorAddress: string, matchId?: string): Prom
 
 /**
  * Get aggregate stats for a wallet: total bet, total payout, profit/loss, win count.
+ * Optionally filtered by token.
  */
-export async function getWalletStats(bettorAddress: string) {
+export async function getWalletStats(bettorAddress: string, token?: Token) {
   const addr = bettorAddress.toLowerCase();
 
   // Total wagered
   const betRows = await dbQuery<{ total: string; cnt: string }>(
-    `SELECT COALESCE(SUM(amount), 0)::text AS total, COUNT(*)::text AS cnt
-     FROM bets WHERE bettor_address = $1`,
-    [addr],
+    token
+      ? `SELECT COALESCE(SUM(amount), 0)::text AS total, COUNT(*)::text AS cnt
+         FROM bets WHERE bettor_address = $1 AND token = $2`
+      : `SELECT COALESCE(SUM(amount), 0)::text AS total, COUNT(*)::text AS cnt
+         FROM bets WHERE bettor_address = $1`,
+    token ? [addr, token] : [addr],
   );
   const totalBetWei = betRows[0]?.total || '0';
   const totalBets = parseInt(betRows[0]?.cnt || '0', 10);
 
   // Total payouts received
   const payoutRows = await dbQuery<{ total: string; cnt: string }>(
-    `SELECT COALESCE(SUM(payout_amount), 0)::text AS total, COUNT(*)::text AS cnt
-     FROM bet_settlements WHERE bettor_address = $1`,
-    [addr],
+    token
+      ? `SELECT COALESCE(SUM(payout_amount), 0)::text AS total, COUNT(*)::text AS cnt
+         FROM bet_settlements WHERE bettor_address = $1 AND token = $2`
+      : `SELECT COALESCE(SUM(payout_amount), 0)::text AS total, COUNT(*)::text AS cnt
+         FROM bet_settlements WHERE bettor_address = $1`,
+    token ? [addr, token] : [addr],
   );
   const totalPayoutWei = payoutRows[0]?.total || '0';
   const totalWins = parseInt(payoutRows[0]?.cnt || '0', 10);
 
   // Matches participated in
   const matchRows = await dbQuery<{ cnt: string }>(
-    `SELECT COUNT(DISTINCT match_id)::text AS cnt FROM bets WHERE bettor_address = $1`,
-    [addr],
+    token
+      ? `SELECT COUNT(DISTINCT match_id)::text AS cnt FROM bets WHERE bettor_address = $1 AND token = $2`
+      : `SELECT COUNT(DISTINCT match_id)::text AS cnt FROM bets WHERE bettor_address = $1`,
+    token ? [addr, token] : [addr],
   );
   const matchesPlayed = parseInt(matchRows[0]?.cnt || '0', 10);
 
@@ -638,10 +768,12 @@ export async function getMatchHistory(matchId: string) {
 /**
  * Get betting leaderboard ranked by total volume.
  */
-export async function getLeaderboard(limit: number = 50): Promise<LeaderboardEntry[]> {
+export async function getLeaderboard(limit: number = 50, token?: Token): Promise<LeaderboardEntry[]> {
   const rows = await dbQuery<any>(
-    `SELECT * FROM betting_leaderboard ORDER BY total_volume DESC LIMIT $1`,
-    [limit],
+    token
+      ? `SELECT * FROM betting_leaderboard WHERE token = $2 ORDER BY total_volume DESC LIMIT $1`
+      : `SELECT * FROM betting_leaderboard ORDER BY total_volume DESC LIMIT $1`,
+    token ? [limit, token] : [limit],
   );
 
   return rows.map((r: any) => ({
@@ -697,17 +829,17 @@ export async function getAgentWallet(agentName: string, apiKey: string): Promise
 
 // ── Internal helpers ───────────────────────────────────────────────────
 
-async function updateLeaderboard(bettorAddress: string, bettorName: string | null, amountWei: string) {
+async function updateLeaderboard(bettorAddress: string, bettorName: string | null, amountWei: string, token: Token) {
   try {
     await dbQuery(
-      `INSERT INTO betting_leaderboard (bettor_address, bettor_name, total_volume, total_bets, last_bet_at)
-       VALUES ($1, $2, $3, 1, NOW())
-       ON CONFLICT (bettor_address) DO UPDATE SET
+      `INSERT INTO betting_leaderboard (bettor_address, token, bettor_name, total_volume, total_bets, last_bet_at)
+       VALUES ($1, $4, $2, $3, 1, NOW())
+       ON CONFLICT (bettor_address, token) DO UPDATE SET
          bettor_name = COALESCE($2, betting_leaderboard.bettor_name),
          total_volume = betting_leaderboard.total_volume + $3,
          total_bets = betting_leaderboard.total_bets + 1,
          last_bet_at = NOW()`,
-      [bettorAddress.toLowerCase(), bettorName, amountWei],
+      [bettorAddress.toLowerCase(), bettorName, amountWei, token],
     );
   } catch (err) {
     console.error('[betting/service] updateLeaderboard failed:', err);

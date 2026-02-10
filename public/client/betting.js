@@ -20,6 +20,15 @@ let contractAddress = '';
 let contractABI = [];
 let currentBettingStatus = null; // latest BettingStatus from server
 let currentMatchId = null;
+let currentBetToken = 'MON';     // 'MON' | 'MCLAW'
+
+// $MClawIO token (Monad) – same CA as TOKEN tab
+const MCLAW_TOKEN_ADDRESS = '0x26813a9B80f43f98cee9045B9f7CdcA816C57777';
+
+const TOKEN_META = {
+  MON:   { symbol: 'MON' },
+  MCLAW: { symbol: 'MClawIO' },
+};
 
 const MONAD_MAINNET = {
   chainId: '0x8f',            // 143
@@ -228,12 +237,41 @@ window.switchBetSubTab = function switchBetSubTab(tab) {
   if (tab === 'mybets' && currentMatchId) fetchMyBets(currentMatchId);
 };
 
+// Switch between MON and MClawIO betting pools
+window.switchBetToken = function switchBetToken(token) {
+  const normalized = token === 'MCLAW' ? 'MCLAW' : 'MON';
+  currentBetToken = normalized;
+  const btnMon = document.getElementById('bet-token-mon');
+  const btnMclaw = document.getElementById('bet-token-mclaw');
+  if (btnMon && btnMclaw) {
+    if (normalized === 'MON') {
+      btnMon.className = 'px-2 py-0.5 bg-black text-[#facc15]';
+      btnMclaw.className = 'px-2 py-0.5 bg-transparent text-black/60';
+    } else {
+      btnMon.className = 'px-2 py-0.5 bg-transparent text-black/60';
+      btnMclaw.className = 'px-2 py-0.5 bg-black text-[#facc15]';
+    }
+  }
+  if (currentMatchId) {
+    fetchBettingStatus(currentMatchId);
+    // Refresh per-token views if their tabs are active
+    const myBetsPanel = document.getElementById('bet-panel-mybets');
+    if (myBetsPanel && !myBetsPanel.classList.contains('hidden')) {
+      fetchMyBets(currentMatchId);
+    }
+    const leadersPanel = document.getElementById('bet-panel-leaders');
+    if (leadersPanel && !leadersPanel.classList.contains('hidden')) {
+      fetchLeaderboard();
+    }
+  }
+};
+
 /* ================================================================
    Betting Status & Odds
    ================================================================ */
 async function fetchBettingStatus(matchId) {
   try {
-    const res = await fetch(`/api/betting/status/${matchId}`);
+    const res = await fetch(`/api/betting/status/${matchId}?token=${encodeURIComponent(currentBetToken)}`);
     const data = await res.json();
     currentBettingStatus = data;
     renderBettingUI(data);
@@ -255,6 +293,11 @@ function renderBettingUI(status) {
   // Total pool
   const poolEl = document.getElementById('total-pool-display');
   if (poolEl) poolEl.textContent = status.totalPoolMON || '0';
+  const poolSymbolEl = document.getElementById('total-pool-symbol');
+  if (poolSymbolEl) {
+    const meta = TOKEN_META[status.token || currentBetToken] || TOKEN_META.MON;
+    poolSymbolEl.textContent = meta.symbol;
+  }
 
   // Bettor count
   const countEl = document.getElementById('betting-bettor-count');
@@ -287,9 +330,10 @@ function renderBettingUI(status) {
     const color = AGENT_COLORS[i % AGENT_COLORS.length];
     const isOpen = status.status === 'open';
     const multiplierText = agent.multiplier > 0 ? agent.multiplier.toFixed(2) + 'x' : '--';
+    const tokenMeta = TOKEN_META[status.token || currentBetToken] || TOKEN_META.MON;
     const payoutHint = agent.multiplier > 0 && agent.multiplier < 1
       ? ' (favorite – less than bet back if win)'
-      : agent.multiplier > 0 ? ' (per 1 MON bet back if win)' : '';
+      : agent.multiplier > 0 ? ` (per 1 ${tokenMeta.symbol} bet back if win)` : '';
 
     return `
       <div class="bg-slate-800 border-2 border-white p-3 shadow-[3px_3px_0_black]">
@@ -298,7 +342,7 @@ function renderBettingUI(status) {
             <div class="w-4 h-4 border-2 border-white" style="background:${color}"></div>
             <span class="text-sm font-black text-white uppercase">${escHtml(agent.agentName)}</span>
           </div>
-          <div class="text-right" title="If this agent wins: you get this many MON per 1 MON bet${payoutHint}">
+          <div class="text-right" title="If this agent wins: you get this many ${tokenMeta.symbol} per 1 ${tokenMeta.symbol} bet${payoutHint}">
             <div class="text-[9px] font-bold text-slate-400 uppercase">Payout</div>
             <span class="bet-multiplier text-lg neo-font" style="color:${color}">${multiplierText}</span>
           </div>
@@ -310,12 +354,12 @@ function renderBettingUI(status) {
           <span class="text-[10px] font-bold text-slate-400 w-12 text-right" title="Share of total pool">${agent.percentage.toFixed(1)}% pool</span>
         </div>
         <div class="flex items-center justify-between text-[10px] text-slate-400 font-bold mb-2">
-          <span>${agent.poolMON} MON pooled</span>
+          <span>${agent.poolMON} ${tokenMeta.symbol} pooled</span>
           <span>${agent.bettorCount} bettor${agent.bettorCount !== 1 ? 's' : ''}</span>
         </div>
         ${isOpen ? `
         <div class="flex gap-2">
-          <input type="number" min="0.01" step="0.01" placeholder="MON" id="bet-input-${i}"
+          <input type="number" min="0.01" step="0.01" placeholder="${tokenMeta.symbol}" id="bet-input-${i}"
                  class="flex-1 bg-slate-900 border-2 border-white text-white text-sm px-2 py-1.5 font-mono focus:border-[#facc15] outline-none"
                  style="max-width: 100px;" />
           <button onclick="placeBetOnAgent('${escAttr(agent.agentName)}', ${i})"
@@ -344,8 +388,9 @@ window.placeBetOnAgent = async function placeBetOnAgent(agentName, inputIndex) {
     return;
   }
 
-  const amountMON = input.value;
-  const amountWei = ethers.parseEther(amountMON);
+  const tokenUsed = currentBetToken; // capture at click time
+  const amountTyped = input.value;
+  const amountWei = ethers.parseEther(amountTyped);
 
   if (!currentMatchId) {
     showToast('No active match to bet on', 'error');
@@ -353,16 +398,35 @@ window.placeBetOnAgent = async function placeBetOnAgent(agentName, inputIndex) {
   }
 
   try {
-    showToast(`Placing bet of ${amountMON} MON on ${agentName}...`, 'info');
+    const tokenMeta = TOKEN_META[tokenUsed] || TOKEN_META.MON;
+    showToast(`Placing bet of ${amountTyped} ${tokenMeta.symbol} on ${agentName}...`, 'info');
 
     const matchIdB32 = ethers.encodeBytes32String(currentMatchId.length > 31 ? currentMatchId.slice(0, 31) : currentMatchId);
     const agentIdB32 = ethers.encodeBytes32String(agentName.length > 31 ? agentName.slice(0, 31) : agentName);
 
-    const tx = await bettingContract.placeBet(matchIdB32, agentIdB32, { value: amountWei });
+    let tx;
+    if (tokenUsed === 'MON') {
+      // Native MON bet
+      tx = await bettingContract.placeBet(matchIdB32, agentIdB32, { value: amountWei });
+    } else {
+      // $MClawIO ERC-20 bet: ensure approval then call placeMclawBet
+      const erc20Abi = [
+        'function allowance(address owner, address spender) view returns (uint256)',
+        'function approve(address spender, uint256 amount) returns (bool)',
+      ];
+      const mclaw = new ethers.Contract(MCLAW_TOKEN_ADDRESS, erc20Abi, signer);
+      const allowance = await mclaw.allowance(walletAddress, contractAddress);
+      if (allowance < amountWei) {
+        showToast(`Approving ${tokenMeta.symbol} for betting contract...`, 'info');
+        const approveTx = await mclaw.approve(contractAddress, amountWei);
+        await approveTx.wait();
+      }
+      tx = await bettingContract.placeMclawBet(matchIdB32, agentIdB32, amountWei);
+    }
     showToast(`Transaction submitted. Waiting for confirmation...`, 'info');
 
     const receipt = await tx.wait();
-    showToast(`You bet ${amountMON} MON on ${agentName}`, 'success');
+    showToast(`You bet ${amountTyped} ${TOKEN_META[tokenUsed].symbol} on ${agentName}`, 'success');
 
     // Notify backend so it records the bet in DB
     if (window._bettingSocket) {
@@ -371,6 +435,7 @@ window.placeBetOnAgent = async function placeBetOnAgent(agentName, inputIndex) {
         bettorAddress: walletAddress,
         agentName,
         amountWei: amountWei.toString(),
+        token: tokenUsed,
         txHash: receipt.hash,
       });
     }
@@ -426,7 +491,7 @@ async function fetchMyBets(matchId) {
 
   try {
     // Fetch all bets + stats for this wallet
-    const res = await fetch(`/api/betting/bets-by-wallet/${walletAddress}`);
+    const res = await fetch(`/api/betting/bets-by-wallet/${walletAddress}?token=${encodeURIComponent(currentBetToken)}`);
     const data = await res.json();
     const allBets = data.bets || [];
     const stats = data.stats || null;
@@ -434,21 +499,22 @@ async function fetchMyBets(matchId) {
     // ── Stats banner ──
     let html = '';
     if (stats) {
+      const tokenMeta = TOKEN_META[currentBetToken] || TOKEN_META.MON;
       const plColor = stats.isProfit ? '#22c55e' : (stats.profitLoss === '0' ? '#94a3b8' : '#ef4444');
       const plSign = stats.isProfit && stats.profitLoss !== '0' ? '+' : '';
       html += `
         <div class="grid grid-cols-3 gap-2 mb-3">
           <div class="bg-slate-800 border-2 border-white p-2 text-center">
             <div class="text-[9px] font-bold text-slate-400 uppercase">Total Bet</div>
-            <div class="text-sm font-black text-[#facc15]">${escHtml(stats.totalBetMON)} MON</div>
+            <div class="text-sm font-black text-[#facc15]">${escHtml(stats.totalBetMON)} ${tokenMeta.symbol}</div>
           </div>
           <div class="bg-slate-800 border-2 border-white p-2 text-center">
             <div class="text-[9px] font-bold text-slate-400 uppercase">Total Won</div>
-            <div class="text-sm font-black text-[#22d3ee]">${escHtml(stats.totalPayoutMON)} MON</div>
+            <div class="text-sm font-black text-[#22d3ee]">${escHtml(stats.totalPayoutMON)} ${tokenMeta.symbol}</div>
           </div>
           <div class="bg-slate-800 border-2 border-white p-2 text-center">
             <div class="text-[9px] font-bold text-slate-400 uppercase">P&L</div>
-            <div class="text-sm font-black" style="color:${plColor}">${plSign}${escHtml(stats.profitLossMON)} MON</div>
+            <div class="text-sm font-black" style="color:${plColor}">${plSign}${escHtml(stats.profitLossMON)} ${tokenMeta.symbol}</div>
           </div>
         </div>
         <div class="flex gap-3 mb-3 text-[10px] font-bold text-slate-400">
@@ -477,11 +543,12 @@ async function fetchMyBets(matchId) {
       html += `<div class="text-[10px] font-black text-slate-400 uppercase mt-2 mb-1">${escHtml(mId)}${isCurrent ? ' (current)' : ''}</div>`;
       html += bets.map(b => {
         const amtMON = weiToMON(b.amount);
+        const tokenMeta = TOKEN_META[currentBetToken] || TOKEN_META.MON;
         return `
           <div class="bg-slate-800 border-2 border-white p-2 flex items-center justify-between">
             <div>
               <span class="text-xs font-black text-[#facc15] uppercase">${escHtml(b.agentName)}</span>
-              <span class="text-xs text-slate-400 ml-2">${amtMON} MON</span>
+              <span class="text-xs text-slate-400 ml-2">${amtMON} ${tokenMeta.symbol}</span>
             </div>
             ${b.txHash ? `<a href="https://monadvision.com/tx/${b.txHash}" target="_blank" class="text-[10px] text-[#22d3ee] font-mono hover:underline">${b.txHash.slice(0,8)}...</a>` : ''}
           </div>
@@ -503,7 +570,7 @@ async function fetchLeaderboard() {
   if (!container) return;
 
   try {
-    const res = await fetch('/api/betting/leaderboard');
+    const res = await fetch(`/api/betting/leaderboard?token=${encodeURIComponent(currentBetToken)}`);
     const data = await res.json();
     const leaders = data.leaderboard || [];
 
@@ -512,6 +579,7 @@ async function fetchLeaderboard() {
       return;
     }
 
+    const tokenMeta = TOKEN_META[currentBetToken] || TOKEN_META.MON;
     container.innerHTML = leaders.slice(0, 20).map((e, i) => {
       const rank = i + 1;
       const rankColors = { 1: '#facc15', 2: '#94a3b8', 3: '#f97316' };
@@ -524,7 +592,7 @@ async function fetchLeaderboard() {
             <div class="text-[10px] text-slate-400 font-mono">${shortenAddr(e.bettorAddress)}</div>
           </div>
           <div class="text-right">
-            <div class="text-xs font-black text-[#facc15]">${e.totalVolumeMON} MON</div>
+            <div class="text-xs font-black text-[#facc15]">${e.totalVolumeMON} ${tokenMeta.symbol}</div>
             <div class="text-[10px] text-slate-400">${e.totalBets} bets / ${e.totalWins} wins</div>
           </div>
         </div>
@@ -607,6 +675,10 @@ function initBettingSocket() {
 
     // Real-time odds update (after every bet)
     socket.on('bettingUpdate', (status) => {
+      // Ignore updates for a different token than the one currently selected
+      if (status.token && status.token !== currentBetToken) {
+        return;
+      }
       currentBettingStatus = status;
       renderBettingUI(status);
     });
@@ -616,7 +688,8 @@ function initBettingSocket() {
       // Don't toast our own bets (already handled)
       if (walletAddress && data.bettorAddress === walletAddress.toLowerCase()) return;
       const name = data.bettorName || shortenAddr(data.bettorAddress);
-      showToast(`${name} bet ${data.amountMON} MON on ${data.agentName}`, 'neutral');
+      const tokenMeta = TOKEN_META[data.token || 'MON'] || TOKEN_META.MON;
+      showToast(`${name} bet ${data.amountMON} ${tokenMeta.symbol} on ${data.agentName}`, 'neutral');
     });
 
     // Betting closed
@@ -660,14 +733,20 @@ async function checkClaimable(matchId) {
   if (!bettingContract || !walletAddress) return;
   try {
     const matchIdB32 = ethers.encodeBytes32String(matchId.length > 31 ? matchId.slice(0, 31) : matchId);
-    const amount = await bettingContract.getClaimableAmount(matchIdB32, walletAddress);
-    if (amount > 0n) {
-      const amtMON = parseFloat(ethers.formatEther(amount)).toFixed(4);
+    const res = await bettingContract.getClaimableAmounts(matchIdB32, walletAddress);
+    const monAmount = res[0];
+    const mclawAmount = res[1];
+    const total = (monAmount || 0n) + (mclawAmount || 0n);
+    if (total > 0n) {
+      const parts = [];
+      if (monAmount && monAmount > 0n) parts.push(parseFloat(ethers.formatEther(monAmount)).toFixed(4) + ' MON');
+      if (mclawAmount && mclawAmount > 0n) parts.push(parseFloat(ethers.formatEther(mclawAmount)).toFixed(4) + ' MClawIO');
+      const label = parts.join(' + ');
       const claimSection = document.getElementById('claim-section');
       const claimAmount = document.getElementById('claimable-amount');
       if (claimSection) claimSection.classList.remove('hidden');
-      if (claimAmount) claimAmount.textContent = amtMON + ' MON';
-      showToast(`You won ${amtMON} MON! Claim now.`, 'gold');
+      if (claimAmount) claimAmount.textContent = label;
+      showToast(`You won ${label}! Claim now.`, 'gold');
     }
   } catch (err) {
     console.error('checkClaimable failed:', err);

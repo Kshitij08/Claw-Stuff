@@ -74,6 +74,7 @@ io.on('connection', (socket) => {
     agentName: string;
     amountWei: string;
     txHash: string;
+    token?: 'MON' | 'MCLAW';
   }) => {
     try {
       const { placeBet } = await import('./betting/service.js');
@@ -84,6 +85,7 @@ io.on('connection', (socket) => {
         matchId: data.matchId,
         agentName: data.agentName,
         amountWei: data.amountWei,
+        token: data.token === 'MCLAW' ? 'MCLAW' : 'MON',
         txHash: data.txHash,
       });
     } catch (err) {

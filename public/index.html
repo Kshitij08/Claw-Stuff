@@ -509,11 +509,17 @@
                     <!-- Pool Summary -->
                     <div class="bg-[#facc15] p-4 border-2 border-white shadow-[6px_6px_0_black]">
                         <div class="flex justify-between items-end mb-2">
-                            <div class="text-xs font-black uppercase text-black">Total Pool</div>
+                            <div class="flex items-center gap-2">
+                                <div class="text-xs font-black uppercase text-black">Total Pool</div>
+                                <div class="inline-flex rounded-full border-2 border-black overflow-hidden text-[9px] font-black uppercase">
+                                    <button id="bet-token-mon" onclick="switchBetToken('MON')" class="px-2 py-0.5 bg-black text-[#facc15]">MON</button>
+                                    <button id="bet-token-mclaw" onclick="switchBetToken('MCLAW')" class="px-2 py-0.5 bg-transparent text-black/60">MClawIO</button>
+                                </div>
+                            </div>
                             <div class="text-xs font-black uppercase text-black" id="betting-phase-badge">--</div>
                         </div>
                         <div class="flex justify-between items-center mb-3">
-                            <div class="text-2xl md:text-3xl neo-font text-black"><span id="total-pool-display">0</span> <span class="text-base">MON</span></div>
+                            <div class="text-2xl md:text-3xl neo-font text-black"><span id="total-pool-display">0</span> <span class="text-base" id="total-pool-symbol">MON</span></div>
                             <div class="bg-black text-white px-3 py-1 font-bold text-sm" id="betting-bettor-count">0 bettors</div>
                         </div>
                         <div class="h-3 w-full bg-white border-2 border-black overflow-hidden flex" id="pool-bar">

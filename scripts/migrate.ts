@@ -118,6 +118,12 @@ async function main() {
       );
     `);
 
+    // Token column for bets (MON vs MCLAW). Defaults to MON for existing rows.
+    await client.query(`
+      ALTER TABLE bets
+        ADD COLUMN IF NOT EXISTS token TEXT NOT NULL DEFAULT 'MON';
+    `);
+
     // ── Bet settlements (payout records) ──────────────────────────────
     await client.query(`
       CREATE TABLE IF NOT EXISTS bet_settlements (
@@ -130,17 +136,50 @@ async function main() {
       );
     `);
 
-    // ── Betting leaderboard (aggregated stats per bettor) ─────────────
+    // Token column for settlements (MON vs MCLAW). Defaults to MON for existing rows.
+    await client.query(`
+      ALTER TABLE bet_settlements
+        ADD COLUMN IF NOT EXISTS token TEXT NOT NULL DEFAULT 'MON';
+    `);
+
+    // ── Betting leaderboard (aggregated stats per bettor, per token) ───
     await client.query(`
       CREATE TABLE IF NOT EXISTS betting_leaderboard (
-        bettor_address  TEXT PRIMARY KEY,
+        bettor_address  TEXT NOT NULL,
+        token           TEXT NOT NULL DEFAULT 'MON',
         bettor_name     TEXT,
         total_volume    NUMERIC(78,0) NOT NULL DEFAULT 0,
         total_bets      INTEGER NOT NULL DEFAULT 0,
         total_wins      INTEGER NOT NULL DEFAULT 0,
         total_payout    NUMERIC(78,0) NOT NULL DEFAULT 0,
-        last_bet_at     TIMESTAMPTZ
+        last_bet_at     TIMESTAMPTZ,
+        PRIMARY KEY (bettor_address, token)
       );
+    `);
+
+    // Ensure token column exists (for previously created tables) and primary key uses (bettor_address, token)
+    await client.query(`
+      ALTER TABLE betting_leaderboard
+        ADD COLUMN IF NOT EXISTS token TEXT NOT NULL DEFAULT 'MON';
+    `);
+    // Adjust primary key to include token (safe if already set this way)
+    await client.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1
+          FROM   information_schema.table_constraints
+          WHERE  table_name = 'betting_leaderboard'
+          AND    constraint_type = 'PRIMARY KEY'
+          AND    constraint_name = 'betting_leaderboard_pkey'
+        ) THEN
+          ALTER TABLE betting_leaderboard DROP CONSTRAINT betting_leaderboard_pkey;
+        END IF;
+      END$$;
+    `);
+    await client.query(`
+      ALTER TABLE betting_leaderboard
+        ADD CONSTRAINT betting_leaderboard_pkey PRIMARY KEY (bettor_address, token);
     `);
 
     await client.query('COMMIT');

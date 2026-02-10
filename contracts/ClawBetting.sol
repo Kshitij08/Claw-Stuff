@@ -3,13 +3,14 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /**
  * @title ClawBetting
- * @notice Pari-mutuel prediction market for Claw IO matches using native MON.
- *         Humans call placeBet() directly; the backend operator calls placeBetFor()
- *         on behalf of agents. After a match, the operator resolves and winners
- *         claim their proportional share of 90% of the pool.
+ * @notice Pari-mutuel prediction market for Claw IO matches using native MON
+ *         and ERC20 $MClawIO. Humans and agents always place and fund their
+ *         own bets (self-funded). After a match, the operator resolves and
+ *         winners claim their proportional share of 90% of each token pool.
  *
  * Distribution:
  *   90% → bettors who backed the winning agent(s)  (proportional)
@@ -33,23 +34,34 @@ contract ClawBetting is Ownable, ReentrancyGuard {
     uint256 public minBetAmount;
     uint256 public maxBetAmount; // 0 = no limit
 
+    // ERC-20 token used for the secondary pool ($MClawIO)
+    IERC20 public immutable mclawToken;
+
     enum MatchStatus { None, Open, Closed, Resolved, Cancelled }
+
+    // Per-token pool for a match
+    struct Pool {
+        uint256 totalPool;
+        // agentId → total amount bet on that agent for this token
+        mapping(bytes32 => uint256) agentPools;
+        // bettor → agentId → amount for this token
+        mapping(address => mapping(bytes32 => uint256)) bets;
+        // bettor → total across all agents in this match for this token
+        mapping(address => uint256) totalBetByUser;
+        // list of unique bettors for this token (for refunds)
+        address[] bettors;
+    }
 
     struct MatchInfo {
         MatchStatus status;
-        uint256 totalPool;
         bytes32[] agentIds;
         bytes32[] winnerAgentIds;
-        // agentId → total amount bet on that agent
-        mapping(bytes32 => uint256) agentPools;
-        // bettor → agentId → amount
-        mapping(address => mapping(bytes32 => uint256)) bets;
-        // bettor → total across all agents in this match
-        mapping(address => uint256) totalBetByUser;
-        // bettor → already claimed?
-        mapping(address => bool) claimed;
-        // list of unique bettors (for refund iteration)
-        address[] bettors;
+        // One pool per token: native MON and ERC20 $MClawIO
+        Pool monPool;
+        Pool mclawPool;
+        // bettor → already claimed for each token
+        mapping(address => bool) claimedMon;
+        mapping(address => bool) claimedMclaw;
     }
 
     mapping(bytes32 => MatchInfo) private matches;
@@ -82,6 +94,22 @@ contract ClawBetting is Ownable, ReentrancyGuard {
         uint256 amount
     );
 
+    // Token-specific events
+    event MclawBetPlaced(
+        bytes32 indexed matchId,
+        address indexed bettor,
+        bytes32 indexed agentId,
+        uint256 amount
+    );
+
+    event MatchResolvedToken(
+        bytes32 indexed matchId,
+        address indexed token, // address(0) = MON, mclawToken = $MClawIO
+        uint256 totalPool,
+        uint256 treasuryPayout,
+        uint256 agentPayout
+    );
+
     // ── Modifiers ──────────────────────────────────────────────────────
     modifier onlyOperator() {
         require(msg.sender == operator, "ClawBetting: caller is not the operator");
@@ -93,14 +121,17 @@ contract ClawBetting is Ownable, ReentrancyGuard {
         address _treasury,
         address _operator,
         uint256 _minBetAmount,
-        uint256 _maxBetAmount
+        uint256 _maxBetAmount,
+        address _mclawToken
     ) Ownable(msg.sender) {
         require(_treasury != address(0), "ClawBetting: zero treasury");
         require(_operator != address(0), "ClawBetting: zero operator");
+        require(_mclawToken != address(0), "ClawBetting: zero mclaw token");
         treasury = _treasury;
         operator = _operator;
         minBetAmount = _minBetAmount;
         maxBetAmount = _maxBetAmount;
+        mclawToken = IERC20(_mclawToken);
     }
 
     // ── Admin setters ──────────────────────────────────────────────────
@@ -160,25 +191,40 @@ contract ClawBetting is Ownable, ReentrancyGuard {
     }
 
     /**
-     * @notice Human places a bet by sending MON directly.
+     * @notice Human or agent places a bet by sending MON directly from their
+     *         own wallet. All bets are self-funded; the operator never places
+     *         bets on behalf of others.
      */
     function placeBet(
         bytes32 matchId,
         bytes32 agentId
     ) external payable nonReentrant {
-        _placeBet(msg.sender, matchId, agentId, msg.value);
+        MatchInfo storage m = matches[matchId];
+        require(m.status == MatchStatus.Open, "ClawBetting: betting not open");
+        _placeBetInPool(m, m.monPool, msg.sender, agentId, msg.value);
+        emit BetPlaced(matchId, msg.sender, agentId, msg.value);
     }
 
     /**
-     * @notice Operator places a bet on behalf of an agent (sends MON with the call).
+     * @notice Human or agent places a bet using ERC20 $MClawIO. Caller must
+     *         have approved this contract for at least `amount`.
      */
-    function placeBetFor(
-        address bettor,
+    function placeMclawBet(
         bytes32 matchId,
-        bytes32 agentId
-    ) external payable onlyOperator nonReentrant {
-        require(bettor != address(0), "ClawBetting: zero bettor");
-        _placeBet(bettor, matchId, agentId, msg.value);
+        bytes32 agentId,
+        uint256 amount
+    ) external nonReentrant {
+        MatchInfo storage m = matches[matchId];
+        require(m.status == MatchStatus.Open, "ClawBetting: betting not open");
+        require(amount > 0, "ClawBetting: zero amount");
+
+        require(
+            mclawToken.transferFrom(msg.sender, address(this), amount),
+            "ClawBetting: MCLAW transfer failed"
+        );
+
+        _placeBetInPool(m, m.mclawPool, msg.sender, agentId, amount);
+        emit MclawBetPlaced(matchId, msg.sender, agentId, amount);
     }
 
     /**
@@ -212,67 +258,53 @@ contract ClawBetting is Ownable, ReentrancyGuard {
         m.status = MatchStatus.Resolved;
         m.winnerAgentIds = winnerAgentIds;
 
-        uint256 pool = m.totalPool;
-        if (pool == 0) {
-            // Nothing wagered – just mark resolved.
-            emit MatchResolved(matchId, winnerAgentIds, 0, 0, 0);
-            return;
-        }
+        // Resolve MON pool
+        _resolvePoolForToken(
+            matchId,
+            m,
+            m.monPool,
+            address(0),
+            winnerAgentIds,
+            winnerAgentWallets
+        );
 
-        // ── Calculate shares ──
-        uint256 treasuryAmount = (pool * TREASURY_BPS) / BPS_DENOMINATOR;
-        uint256 agentAmount    = (pool * WINNER_AGENT_BPS) / BPS_DENOMINATOR;
-        // bettorPool is implicitly whatever remains after treasury + agent
-
-        // ── Check if anyone bet on any winner ──
-        uint256 combinedWinnerPool = 0;
-        for (uint256 i = 0; i < winnerAgentIds.length; i++) {
-            combinedWinnerPool += m.agentPools[winnerAgentIds[i]];
-        }
-
-        if (combinedWinnerPool == 0) {
-            // Nobody bet on the winner(s) → 90 % also goes to treasury
-            treasuryAmount = pool - agentAmount; // treasury gets 95 %
-        }
-
-        // ── Transfer 5 % agent reward (split equally among winners) ──
-        // Unclaimed shares (agent has no wallet) are added to treasury.
-        uint256 perAgent = agentAmount / winnerAgentIds.length;
-        uint256 unclaimedAgentReward = 0;
-        for (uint256 i = 0; i < winnerAgentIds.length; i++) {
-            if (winnerAgentWallets[i] != address(0) && perAgent > 0) {
-                (bool ok, ) = winnerAgentWallets[i].call{value: perAgent}("");
-                require(ok, "ClawBetting: agent transfer failed");
-            } else {
-                unclaimedAgentReward += perAgent;
-            }
-        }
-        treasuryAmount += unclaimedAgentReward;
-
-        // ── Transfer treasury share ──
-        if (treasuryAmount > 0) {
-            (bool ok, ) = treasury.call{value: treasuryAmount}("");
-            require(ok, "ClawBetting: treasury transfer failed");
-        }
-
-        emit MatchResolved(matchId, winnerAgentIds, pool, treasuryAmount, agentAmount);
+        // Resolve MClawIO pool
+        _resolvePoolForToken(
+            matchId,
+            m,
+            m.mclawPool,
+            address(mclawToken),
+            winnerAgentIds,
+            winnerAgentWallets
+        );
     }
 
     /**
-     * @notice Winning bettor claims proportional share of the 90 % pool.
+     * @notice Winning bettor claims proportional share of the 90 % MON pool.
      */
     function claim(bytes32 matchId) external nonReentrant {
-        _claim(msg.sender, matchId);
+        _claimMon(msg.sender, matchId);
     }
 
     /**
-     * @notice Operator claims on behalf of an agent bettor.
+     * @notice Operator claims MON winnings on behalf of a bettor (e.g. agents).
      */
-    function claimFor(
-        address bettor,
-        bytes32 matchId
-    ) external onlyOperator nonReentrant {
-        _claim(bettor, matchId);
+    function claimFor(address bettor, bytes32 matchId) external onlyOperator nonReentrant {
+        _claimMon(bettor, matchId);
+    }
+
+    /**
+     * @notice Winning bettor claims proportional share of the 90 % $MClawIO pool.
+     */
+    function claimMclaw(bytes32 matchId) external nonReentrant {
+        _claimMclaw(msg.sender, matchId);
+    }
+
+    /**
+     * @notice Operator claims $MClawIO winnings on behalf of a bettor.
+     */
+    function claimMclawFor(address bettor, bytes32 matchId) external onlyOperator nonReentrant {
+        _claimMclaw(bettor, matchId);
     }
 
     /**
@@ -286,14 +318,28 @@ contract ClawBetting is Ownable, ReentrancyGuard {
         );
         m.status = MatchStatus.Cancelled;
 
-        for (uint256 i = 0; i < m.bettors.length; i++) {
-            address bettor = m.bettors[i];
-            uint256 total = m.totalBetByUser[bettor];
+        // Refund MON bettors
+        for (uint256 i = 0; i < m.monPool.bettors.length; i++) {
+            address bettor = m.monPool.bettors[i];
+            uint256 total = m.monPool.totalBetByUser[bettor];
             if (total > 0) {
-                m.totalBetByUser[bettor] = 0;
+                m.monPool.totalBetByUser[bettor] = 0;
                 (bool ok, ) = bettor.call{value: total}("");
                 require(ok, "ClawBetting: refund failed");
                 emit BetRefunded(matchId, bettor, total);
+            }
+        }
+
+        // Refund MClaw bettors
+        for (uint256 i = 0; i < m.mclawPool.bettors.length; i++) {
+            address bettor = m.mclawPool.bettors[i];
+            uint256 total = m.mclawPool.totalBetByUser[bettor];
+            if (total > 0) {
+                m.mclawPool.totalBetByUser[bettor] = 0;
+                require(
+                    mclawToken.transfer(bettor, total),
+                    "ClawBetting: MCLAW refund failed"
+                );
             }
         }
 
@@ -304,16 +350,23 @@ contract ClawBetting is Ownable, ReentrancyGuard {
 
     function getMatchStatus(bytes32 matchId) external view returns (
         MatchStatus status,
-        uint256 totalPool,
+        uint256 totalPoolMon,
+        uint256 totalPoolMclaw,
         bytes32[] memory agentIds,
         bytes32[] memory winnerAgentIds
     ) {
         MatchInfo storage m = matches[matchId];
-        return (m.status, m.totalPool, m.agentIds, m.winnerAgentIds);
+        return (m.status, m.monPool.totalPool, m.mclawPool.totalPool, m.agentIds, m.winnerAgentIds);
     }
 
     function getAgentPool(bytes32 matchId, bytes32 agentId) external view returns (uint256) {
-        return matches[matchId].agentPools[agentId];
+        MatchInfo storage m = matches[matchId];
+        return m.monPool.agentPools[agentId];
+    }
+
+    function getAgentPoolMclaw(bytes32 matchId, bytes32 agentId) external view returns (uint256) {
+        MatchInfo storage m = matches[matchId];
+        return m.mclawPool.agentPools[agentId];
     }
 
     function getBet(
@@ -321,30 +374,60 @@ contract ClawBetting is Ownable, ReentrancyGuard {
         address bettor,
         bytes32 agentId
     ) external view returns (uint256) {
-        return matches[matchId].bets[bettor][agentId];
+        MatchInfo storage m = matches[matchId];
+        return m.monPool.bets[bettor][agentId];
+    }
+
+    function getBetMclaw(
+        bytes32 matchId,
+        address bettor,
+        bytes32 agentId
+    ) external view returns (uint256) {
+        MatchInfo storage m = matches[matchId];
+        return m.mclawPool.bets[bettor][agentId];
     }
 
     function hasClaimed(bytes32 matchId, address bettor) external view returns (bool) {
-        return matches[matchId].claimed[bettor];
+        MatchInfo storage m = matches[matchId];
+        return m.claimedMon[bettor];
     }
 
-    function getClaimableAmount(
+    function hasClaimedMclaw(bytes32 matchId, address bettor) external view returns (bool) {
+        MatchInfo storage m = matches[matchId];
+        return m.claimedMclaw[bettor];
+    }
+
+    function getClaimableAmounts(
         bytes32 matchId,
         address bettor
-    ) external view returns (uint256) {
+    ) external view returns (uint256 monAmount, uint256 mclawAmount) {
         MatchInfo storage m = matches[matchId];
-        if (m.status != MatchStatus.Resolved) return 0;
-        if (m.claimed[bettor]) return 0;
+        if (m.status != MatchStatus.Resolved) {
+            return (0, 0);
+        }
 
-        (uint256 combinedWinnerPool, uint256 userWinningBets) = _winningBetsOf(m, bettor);
-        if (combinedWinnerPool == 0 || userWinningBets == 0) return 0;
+        if (!m.claimedMon[bettor]) {
+            (uint256 combinedWinnerPoolMon, uint256 userWinningBetsMon) =
+                _winningBetsInPool(m, m.monPool, bettor);
+            if (combinedWinnerPoolMon > 0 && userWinningBetsMon > 0) {
+                uint256 payoutPoolMon = (m.monPool.totalPool * WINNER_BETTORS_BPS) / BPS_DENOMINATOR;
+                monAmount = (userWinningBetsMon * payoutPoolMon) / combinedWinnerPoolMon;
+            }
+        }
 
-        uint256 payoutPool = (m.totalPool * WINNER_BETTORS_BPS) / BPS_DENOMINATOR;
-        return (userWinningBets * payoutPool) / combinedWinnerPool;
+        if (!m.claimedMclaw[bettor]) {
+            (uint256 combinedWinnerPoolMclaw, uint256 userWinningBetsMclaw) =
+                _winningBetsInPool(m, m.mclawPool, bettor);
+            if (combinedWinnerPoolMclaw > 0 && userWinningBetsMclaw > 0) {
+                uint256 payoutPoolMclaw = (m.mclawPool.totalPool * WINNER_BETTORS_BPS) / BPS_DENOMINATOR;
+                mclawAmount = (userWinningBetsMclaw * payoutPoolMclaw) / combinedWinnerPoolMclaw;
+            }
+        }
     }
 
     function getBettorCount(bytes32 matchId) external view returns (uint256) {
-        return matches[matchId].bettors.length;
+        MatchInfo storage m = matches[matchId];
+        return m.monPool.bettors.length;
     }
 
     // ── Owner-only admin ────────────────────────────────────────────────
@@ -373,14 +456,13 @@ contract ClawBetting is Ownable, ReentrancyGuard {
 
     // ── Internal ───────────────────────────────────────────────────────
 
-    function _placeBet(
+    function _placeBetInPool(
+        MatchInfo storage m,
+        Pool storage p,
         address bettor,
-        bytes32 matchId,
         bytes32 agentId,
         uint256 amount
     ) internal {
-        MatchInfo storage m = matches[matchId];
-        require(m.status == MatchStatus.Open, "ClawBetting: betting not open");
         require(amount >= minBetAmount, "ClawBetting: below min bet");
         require(maxBetAmount == 0 || amount <= maxBetAmount, "ClawBetting: above max bet");
 
@@ -394,30 +476,80 @@ contract ClawBetting is Ownable, ReentrancyGuard {
         }
         require(validAgent, "ClawBetting: invalid agent");
 
-        // Track new bettor
-        if (m.totalBetByUser[bettor] == 0) {
-            m.bettors.push(bettor);
+        // Track new bettor for this token pool
+        if (p.totalBetByUser[bettor] == 0) {
+            p.bettors.push(bettor);
         }
 
-        m.bets[bettor][agentId] += amount;
-        m.agentPools[agentId]   += amount;
-        m.totalPool             += amount;
-        m.totalBetByUser[bettor] += amount;
-
-        emit BetPlaced(matchId, bettor, agentId, amount);
+        p.bets[bettor][agentId] += amount;
+        p.agentPools[agentId]   += amount;
+        p.totalPool             += amount;
+        p.totalBetByUser[bettor] += amount;
     }
 
-    function _claim(address bettor, bytes32 matchId) internal {
+    function _resolvePoolForToken(
+        bytes32 matchId,
+        MatchInfo storage m,
+        Pool storage p,
+        address token,
+        bytes32[] calldata winnerAgentIds,
+        address[] calldata winnerAgentWallets
+    ) internal {
+        uint256 pool = p.totalPool;
+        if (pool == 0) {
+            emit MatchResolvedToken(matchId, token, 0, 0, 0);
+            return;
+        }
+
+        uint256 treasuryAmount = (pool * TREASURY_BPS) / BPS_DENOMINATOR;
+        uint256 agentAmount    = (pool * WINNER_AGENT_BPS) / BPS_DENOMINATOR;
+
+        uint256 combinedWinnerPool = 0;
+        for (uint256 i = 0; i < winnerAgentIds.length; i++) {
+            combinedWinnerPool += p.agentPools[winnerAgentIds[i]];
+        }
+
+        if (combinedWinnerPool == 0) {
+            // Nobody bet on the winner(s) → 90 % also goes to treasury
+            treasuryAmount = pool - agentAmount; // treasury gets 95 %
+        }
+
+        uint256 perAgent = agentAmount / winnerAgentIds.length;
+        uint256 unclaimedAgentReward = 0;
+        for (uint256 i = 0; i < winnerAgentIds.length; i++) {
+            address wallet = winnerAgentWallets[i];
+            if (wallet != address(0) && perAgent > 0) {
+                _payoutToken(token, wallet, perAgent);
+            } else {
+                unclaimedAgentReward += perAgent;
+            }
+        }
+        treasuryAmount += unclaimedAgentReward;
+
+        if (treasuryAmount > 0) {
+            _payoutToken(token, treasury, treasuryAmount);
+        }
+
+        // Preserve existing MatchResolved event semantics for MON for backwards compatibility
+        if (token == address(0)) {
+            emit MatchResolved(matchId, m.winnerAgentIds, pool, treasuryAmount, agentAmount);
+        }
+
+        emit MatchResolvedToken(matchId, token, pool, treasuryAmount, agentAmount);
+    }
+
+    function _claimMon(address bettor, bytes32 matchId) internal {
         MatchInfo storage m = matches[matchId];
         require(m.status == MatchStatus.Resolved, "ClawBetting: not resolved");
-        require(!m.claimed[bettor], "ClawBetting: already claimed");
+        require(!m.claimedMon[bettor], "ClawBetting: already claimed MON");
 
-        (uint256 combinedWinnerPool, uint256 userWinningBets) = _winningBetsOf(m, bettor);
+        (uint256 combinedWinnerPool, uint256 userWinningBets) =
+            _winningBetsInPool(m, m.monPool, bettor);
         require(userWinningBets > 0, "ClawBetting: no winning bets");
 
-        m.claimed[bettor] = true;
+        m.claimedMon[bettor] = true;
 
-        uint256 payoutPool = (m.totalPool * WINNER_BETTORS_BPS) / BPS_DENOMINATOR;
+        uint256 payoutPool = (m.monPool.totalPool * WINNER_BETTORS_BPS) / BPS_DENOMINATOR;
         uint256 payout = (userWinningBets * payoutPool) / combinedWinnerPool;
 
         (bool ok, ) = bettor.call{value: payout}("");
@@ -426,18 +558,48 @@ contract ClawBetting is Ownable, ReentrancyGuard {
         emit WinningsClaimed(matchId, bettor, payout);
     }
 
+    function _claimMclaw(address bettor, bytes32 matchId) internal {
+        MatchInfo storage m = matches[matchId];
+        require(m.status == MatchStatus.Resolved, "ClawBetting: not resolved");
+        require(!m.claimedMclaw[bettor], "ClawBetting: already claimed MCLAW");
+
+        (uint256 combinedWinnerPool, uint256 userWinningBets) =
+            _winningBetsInPool(m, m.mclawPool, bettor);
+        require(userWinningBets > 0, "ClawBetting: no winning bets");
+
+        m.claimedMclaw[bettor] = true;
+
+        uint256 payoutPool = (m.mclawPool.totalPool * WINNER_BETTORS_BPS) / BPS_DENOMINATOR;
+        uint256 payout = (userWinningBets * payoutPool) / combinedWinnerPool;
+
+        require(
+            mclawToken.transfer(bettor, payout),
+            "ClawBetting: MCLAW payout transfer failed"
+        );
+    }
+
     /**
      * @dev Sums the combined pool of all winning agents and the bettor's
-     *      bets that were placed on winning agents. Used for proportional payout.
+     *      bets that were placed on winning agents for a specific token pool.
      */
-    function _winningBetsOf(
+    function _winningBetsInPool(
         MatchInfo storage m,
+        Pool storage p,
         address bettor
     ) internal view returns (uint256 combinedWinnerPool, uint256 userWinningBets) {
         for (uint256 i = 0; i < m.winnerAgentIds.length; i++) {
             bytes32 wId = m.winnerAgentIds[i];
-            combinedWinnerPool += m.agentPools[wId];
-            userWinningBets    += m.bets[bettor][wId];
+            combinedWinnerPool += p.agentPools[wId];
+            userWinningBets    += p.bets[bettor][wId];
+        }
+    }
+
+    function _payoutToken(address token, address to, uint256 amount) internal {
+        if (token == address(0)) {
+            (bool ok, ) = to.call{value: amount}("");
+            require(ok, "ClawBetting: native transfer failed");
+        } else {
+            require(IERC20(token).transfer(to, amount), "ClawBetting: ERC20 transfer failed");
         }
     }
 }

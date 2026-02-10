@@ -228,6 +228,23 @@ export function claimFor(bettorAddress: string, matchId: string): Promise<string
   });
 }
 
+export function claimMclawFor(bettorAddress: string, matchId: string): Promise<string | null> {
+  ensureInit();
+  if (!contract) return Promise.resolve(null);
+  return enqueueOperatorTx(async () => {
+    try {
+      const nonce = await operatorWallet!.getNonce();
+      const tx = await contract!.claimMclawFor(bettorAddress, toBytes32(matchId), { nonce });
+      const receipt = await tx.wait();
+      console.log(`[betting/contract] claimMclawFor(${bettorAddress}, ${matchId}) tx: ${receipt.hash}`);
+      return receipt.hash as string;
+    } catch (err) {
+      console.error('[betting/contract] claimMclawFor failed:', err);
+      return null;
+    }
+  });
+}
+
 export function cancelMatch(matchId: string): Promise<string | null> {
   ensureInit();
   if (!contract) return Promise.resolve(null);
@@ -253,10 +270,11 @@ export async function getMatchStatus(matchId: string) {
   try {
     const result = await readContract.getMatchStatus(toBytes32(matchId));
     return {
-      status: Number(result[0]),          // enum MatchStatus
-      totalPool: result[1].toString(),    // bigint → string
-      agentIds: (result[2] as string[]).map(fromBytes32),
-      winnerAgentIds: (result[3] as string[]).map(fromBytes32),
+      status: Number(result[0]),             // enum MatchStatus
+      totalPoolMon: result[1].toString(),    // bigint → string
+      totalPoolMclaw: result[2].toString(),  // bigint → string
+      agentIds: (result[3] as string[]).map(fromBytes32),
+      winnerAgentIds: (result[4] as string[]).map(fromBytes32),
     };
   } catch (err) {
     console.error('[betting/contract] getMatchStatus failed:', err);
@@ -286,14 +304,17 @@ export async function getBet(matchId: string, bettor: string, agentName: string)
   }
 }
 
-export async function getClaimableAmount(matchId: string, bettor: string): Promise<string> {
+export async function getClaimableAmounts(matchId: string, bettor: string): Promise<{ monAmount: string; mclawAmount: string }> {
   ensureInit();
-  if (!readContract) return '0';
+  if (!readContract) return { monAmount: '0', mclawAmount: '0' };
   try {
-    const val = await readContract.getClaimableAmount(toBytes32(matchId), bettor);
-    return val.toString();
+    const result = await readContract.getClaimableAmounts(toBytes32(matchId), bettor);
+    return {
+      monAmount: result[0].toString(),
+      mclawAmount: result[1].toString(),
+    };
   } catch {
-    return '0';
+    return { monAmount: '0', mclawAmount: '0' };
   }
 }
 

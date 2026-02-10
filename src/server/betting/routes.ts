@@ -57,7 +57,8 @@ export function createBettingRoutes(): Router {
   // No auth. Live odds, pool sizes, bettor counts.
   router.get('/status/:matchId', async (req: Request, res: Response) => {
     try {
-      const status = await bettingService.getBettingStatus(req.params.matchId);
+      const token = req.query.token === 'MCLAW' ? 'MCLAW' : 'MON';
+      const status = await bettingService.getBettingStatus(req.params.matchId, token);
       res.json(status);
     } catch (err) {
       console.error('[betting/routes] /status failed:', err);
@@ -86,7 +87,7 @@ export function createBettingRoutes(): Router {
   });
 
   // ── POST /api/betting/place-bet-direct ───────────────────────────────
-  // Agent auth required. { matchId, agentName, amount, txHash }
+  // Agent auth required. { matchId, agentName, amount, txHash, token? }
   //
   // Flow:
   // 1. Agent signs and sends an on-chain placeBet() tx from its OWN wallet
@@ -99,7 +100,7 @@ export function createBettingRoutes(): Router {
     const agent = await authenticateAgent(req, res);
     if (!agent) return;
 
-    const { matchId, agentName, amount, txHash } = req.body;
+    const { matchId, agentName, amount, txHash, token } = req.body;
     if (!matchId || !agentName || !amount || !txHash) {
       res.status(400).json({
         success: false,
@@ -144,6 +145,7 @@ export function createBettingRoutes(): Router {
       matchId,
       agentName,
       amountWei,
+      token: token === 'MCLAW' ? 'MCLAW' : 'MON',
       txHash,
     });
 
@@ -193,7 +195,8 @@ export function createBettingRoutes(): Router {
     }
 
     const matchId = typeof req.query.matchId === 'string' ? req.query.matchId : undefined;
-    const bets = await bettingService.getUserBets(walletAddress, matchId);
+    const token = req.query.token === 'MCLAW' ? 'MCLAW' : undefined;
+    const bets = await bettingService.getUserBets(walletAddress, matchId, token);
     res.json({ bets });
   });
 
@@ -219,9 +222,10 @@ export function createBettingRoutes(): Router {
     }
     try {
       const matchId = typeof req.query.matchId === 'string' ? req.query.matchId : undefined;
+      const token = req.query.token === 'MCLAW' ? 'MCLAW' : undefined;
       const [bets, stats] = await Promise.all([
-        bettingService.getUserBets(address, matchId),
-        bettingService.getWalletStats(address),
+        bettingService.getUserBets(address, matchId, token),
+        bettingService.getWalletStats(address, token),
       ]);
       res.json({ bets, stats });
     } catch (err) {
@@ -232,9 +236,10 @@ export function createBettingRoutes(): Router {
 
   // ── GET /api/betting/leaderboard ─────────────────────────────────────
   // No auth. Top bettors by volume.
-  router.get('/leaderboard', async (_req: Request, res: Response) => {
+  router.get('/leaderboard', async (req: Request, res: Response) => {
     try {
-      const leaderboard = await bettingService.getLeaderboard();
+      const token = req.query.token === 'MCLAW' ? 'MCLAW' : 'MON';
+      const leaderboard = await bettingService.getLeaderboard(undefined, token);
       res.json({ leaderboard });
     } catch (err) {
       console.error('[betting/routes] /leaderboard failed:', err);

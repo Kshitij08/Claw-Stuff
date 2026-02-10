@@ -83,20 +83,31 @@ export function createBettingRoutes(): Router {
     }
   });
 
-  // ── POST /api/betting/place-bet ──────────────────────────────────────
-  // Agent auth required. { matchId, agentName, amount }
+  // ── POST /api/betting/place-bet-direct ───────────────────────────────
+  // Agent auth required. { matchId, agentName, amount, txHash }
+  //
+  // Flow:
+  // 1. Agent signs and sends an on-chain placeBet() tx from its OWN wallet
+  //    (same as a human using the UI).
+  // 2. After the tx is broadcast/confirmed, the agent calls this endpoint
+  //    to record the bet in the off-chain DB and betting leaderboard.
+  //
   // amount is in wei (string) or MON (number — converted to wei).
-  router.post('/place-bet', async (req: Request, res: Response) => {
+  router.post('/place-bet-direct', async (req: Request, res: Response) => {
     const agent = await authenticateAgent(req, res);
     if (!agent) return;
 
-    const { matchId, agentName, amount } = req.body;
-    if (!matchId || !agentName || !amount) {
-      res.status(400).json({ success: false, error: 'BAD_REQUEST', message: 'matchId, agentName, and amount are required' });
+    const { matchId, agentName, amount, txHash } = req.body;
+    if (!matchId || !agentName || !amount || !txHash) {
+      res.status(400).json({
+        success: false,
+        error: 'BAD_REQUEST',
+        message: 'matchId, agentName, amount, and txHash are required',
+      });
       return;
     }
 
-    // Get agent's wallet address
+    // Get agent's registered wallet address (the one that paid for the tx).
     const walletAddress = await bettingService.getAgentWallet(agent.name);
     if (!walletAddress) {
       res.status(400).json({
@@ -130,10 +141,11 @@ export function createBettingRoutes(): Router {
       matchId,
       agentName,
       amountWei,
+      txHash,
     });
 
     if (result.success) {
-      res.json({ success: true, txHash: result.txHash, message: 'Bet placed successfully' });
+      res.json({ success: true, txHash: result.txHash, message: 'Bet recorded successfully' });
     } else {
       res.status(400).json({ success: false, error: 'BET_FAILED', message: result.error });
     }

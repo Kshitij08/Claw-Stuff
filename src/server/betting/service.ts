@@ -140,8 +140,8 @@ export async function addBettingAgent(matchId: string, agentName: string) {
 
 /**
  * Place a bet (called for both humans via frontend events and agents via API).
- * For agents the backend calls placeBetFor on-chain; for humans the tx is
- * already on-chain and we just record it in the DB.
+ * For humans and self-funded agents the tx is already on-chain and we just
+ * record it in the DB.
  */
 export async function placeBet(opts: {
   bettorAddress: string;
@@ -163,22 +163,21 @@ export async function placeBet(opts: {
     return { success: false, error: 'No betting pool for this match' };
   }
   const poolStatus = poolRows[0].status;
-  // For human bets that already have a txHash (confirmed on-chain), accept even
-  // if the DB status is 'closed' — the contract accepted the bet before closeBetting
-  // was mined, so the money is in the pool and must be tracked.
-  const isConfirmedHumanBet = bettorType === 'human' && !!txHash;
-  if (poolStatus !== 'open' && !(isConfirmedHumanBet && poolStatus === 'closed')) {
+  // For externally-funded bets that already have a txHash (confirmed on-chain),
+  // accept even if the DB status is 'closed' — the contract accepted the bet
+  // before closeBetting was mined, so the money is in the pool and must be tracked.
+  const isConfirmedExternalBet = !!txHash;
+  if (poolStatus !== 'open' && !(isConfirmedExternalBet && poolStatus === 'closed')) {
     return { success: false, error: 'Betting is not open for this match' };
   }
 
   let finalTxHash = txHash || null;
 
-  // For agents: submit tx on-chain via operator
-  if (bettorType === 'agent' && !txHash) {
-    finalTxHash = await chain.placeBetFor(bettorAddress, matchId, agentName, amountWei);
-    if (!finalTxHash) {
-      return { success: false, error: 'On-chain transaction failed' };
-    }
+  // Agents must self-fund bets from their own wallet; this service only records
+  // already-mined transactions. Humans may or may not provide a txHash
+  // depending on the integration, but agents are required to.
+  if (bettorType === 'agent' && !finalTxHash) {
+    return { success: false, error: 'Agent bets must be self-funded and include txHash (use /api/betting/place-bet-direct).' };
   }
 
   // Record bet in DB

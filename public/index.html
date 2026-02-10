@@ -7,6 +7,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Righteous&family=Outfit:wght@500;700;900&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Ethers.js for contract interaction -->
+    <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
     <style>
         :root {
             /* Theme: Dark Neo Toon */
@@ -299,6 +301,29 @@
             overflow-y: auto;
             -webkit-overflow-scrolling: touch;
         }
+
+        /* Toast notifications */
+        .toast {
+            pointer-events: auto;
+            animation: toastIn 0.3s ease-out;
+            transition: opacity 0.3s, transform 0.3s;
+        }
+        .toast.toast-exit {
+            opacity: 0;
+            transform: translateX(100%);
+        }
+        @keyframes toastIn {
+            from { opacity: 0; transform: translateX(100%); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        /* Betting odds bar animation */
+        .odds-bar-fill {
+            transition: width 0.5s ease-out;
+        }
+        .bet-multiplier {
+            transition: all 0.3s ease;
+        }
     </style>
 </head>
 <body class="h-full min-h-screen w-full flex flex-col md:flex-row md:h-screen md:overflow-hidden p-3 gap-4 md:p-5 overflow-y-auto">
@@ -313,9 +338,9 @@
                     CLAW <span class="text-[#d946ef]">IO</span>
                 </h1>
             </div>
-            <div class="w-10 h-10 md:w-12 md:h-12 bg-[#22d3ee] border-2 border-white flex items-center justify-center shadow-[3px_3px_0px_black]">
-                <i data-lucide="gamepad-2" class="w-6 h-6 md:w-7 md:h-7 text-black"></i>
-            </div>
+            <button id="wallet-connect-btn" onclick="connectWallet()" class="px-3 py-2 bg-[#22d3ee] border-2 border-white text-black text-xs font-black uppercase shadow-[3px_3px_0px_black] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[2px_2px_0px_black] transition-all">
+                Connect Wallet
+            </button>
         </div>
 
         <!-- Controls Card -->
@@ -459,26 +484,85 @@
                 </div>
 
                 <!-- ========== BETS TAB ========== -->
-                <div id="panel-market" class="hidden space-y-6">
-                    <div class="bg-[#facc15] p-4 border-2 border-white shadow-[6px_6px_0_black]">
-                        <div class="flex justify-between items-end mb-2">
-                            <div class="text-xs font-black uppercase text-black">Prize Pool</div>
-                            <div class="text-xs font-black uppercase text-black">Wallet</div>
+                <div id="panel-market" class="hidden space-y-4">
+
+                    <!-- Wallet Info Banner -->
+                    <div id="betting-wallet-info" class="bg-slate-800 p-3 border-2 border-white shadow-[4px_4px_0_black]">
+                        <div id="betting-wallet-disconnected" class="flex items-center justify-between">
+                            <span class="text-xs font-bold text-slate-400">Connect your wallet to place bets</span>
+                            <button onclick="connectWallet()" class="px-3 py-1 bg-[#22d3ee] border-2 border-white text-black text-xs font-black uppercase shadow-[2px_2px_0_black]">Connect</button>
                         </div>
-                        <div class="flex justify-between items-center mb-4">
-                            <div class="text-2xl md:text-3xl neo-font text-black">$<span id="total-pool-display">12,450</span></div>
-                            <div class="bg-black text-white px-3 py-1 font-bold text-sm">$500</div>
-                        </div>
-                        <div class="h-4 w-full bg-white border-2 border-black">
-                            <div class="h-full bg-[#d946ef] w-3/4 border-r-2 border-black"></div>
+                        <div id="betting-wallet-connected" class="hidden">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-2">
+                                    <div class="w-2 h-2 rounded-full bg-[#a3e635] animate-pulse"></div>
+                                    <span class="text-xs font-mono text-slate-300" id="betting-wallet-addr">0x...</span>
+                                </div>
+                                <div class="text-right">
+                                    <span class="text-sm font-black text-[#facc15]" id="betting-wallet-balance">0</span>
+                                    <span class="text-xs text-slate-400 font-bold ml-1">MON</span>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
-                    <div id="betting-list" class="space-y-3">
-                        <div class="text-center text-sm font-bold text-slate-400 py-10 bg-slate-800 border-2 border-dashed border-slate-600">
-                            Waiting for players...
+                    <!-- Pool Summary -->
+                    <div class="bg-[#facc15] p-4 border-2 border-white shadow-[6px_6px_0_black]">
+                        <div class="flex justify-between items-end mb-2">
+                            <div class="text-xs font-black uppercase text-black">Total Pool</div>
+                            <div class="text-xs font-black uppercase text-black" id="betting-phase-badge">--</div>
+                        </div>
+                        <div class="flex justify-between items-center mb-3">
+                            <div class="text-2xl md:text-3xl neo-font text-black"><span id="total-pool-display">0</span> <span class="text-base">MON</span></div>
+                            <div class="bg-black text-white px-3 py-1 font-bold text-sm" id="betting-bettor-count">0 bettors</div>
+                        </div>
+                        <div class="h-3 w-full bg-white border-2 border-black overflow-hidden flex" id="pool-bar">
+                            <!-- Filled dynamically per agent -->
                         </div>
                     </div>
+
+                    <!-- Betting sub-tabs: Bet / My Bets / Leaderboard -->
+                    <div class="flex gap-2">
+                        <button onclick="switchBetSubTab('agents')" id="bet-sub-agents" class="flex-1 py-1.5 text-xs font-black uppercase border-2 border-white bg-[#d946ef] text-white shadow-[2px_2px_0_black]">Place Bet</button>
+                        <button onclick="switchBetSubTab('mybets')" id="bet-sub-mybets" class="flex-1 py-1.5 text-xs font-black uppercase border-2 border-white bg-slate-700 text-slate-300 shadow-[2px_2px_0_black]">My Bets</button>
+                        <button onclick="switchBetSubTab('leaders')" id="bet-sub-leaders" class="flex-1 py-1.5 text-xs font-black uppercase border-2 border-white bg-slate-700 text-slate-300 shadow-[2px_2px_0_black]">Leaderboard</button>
+                    </div>
+
+                    <!-- Sub-panel: Agent betting cards -->
+                    <div id="bet-panel-agents" class="space-y-3">
+                        <div id="betting-list" class="space-y-3">
+                            <div class="text-center text-sm font-bold text-slate-400 py-10 bg-slate-800 border-2 border-dashed border-slate-600">
+                                Waiting for players...
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Sub-panel: My Bets -->
+                    <div id="bet-panel-mybets" class="hidden space-y-3">
+                        <div id="my-bets-list" class="space-y-2">
+                            <div class="text-center text-sm font-bold text-slate-400 py-8 bg-slate-800 border-2 border-dashed border-slate-600">
+                                No bets placed yet
+                            </div>
+                        </div>
+                        <!-- Claim section (visible after resolution) -->
+                        <div id="claim-section" class="hidden bg-[#a3e635] p-4 border-2 border-white shadow-[4px_4px_0_black]">
+                            <div class="text-xs font-black uppercase text-black mb-2">Winnings Available</div>
+                            <div class="flex items-center justify-between">
+                                <div class="text-xl neo-font text-black" id="claimable-amount">0 MON</div>
+                                <button onclick="claimWinnings()" class="px-4 py-2 bg-black text-white border-2 border-white text-xs font-black uppercase shadow-[3px_3px_0_white]">Claim</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Sub-panel: Leaderboard -->
+                    <div id="bet-panel-leaders" class="hidden space-y-2">
+                        <div id="betting-leaderboard" class="space-y-2">
+                            <div class="text-center text-sm font-bold text-slate-400 py-8 bg-slate-800 border-2 border-dashed border-slate-600">
+                                Loading leaderboard...
+                            </div>
+                        </div>
+                    </div>
+
                 </div>
 
                 <!-- ========== TOKEN TAB ========== -->
@@ -538,7 +622,7 @@
                             <svg class="w-6 h-6 fill-current" viewBox="0 0 24 24"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.419-2.1568 2.419zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.419-2.1568 2.419z"/></svg>
                         </a>
                         <a href="https://farcaster.xyz/clawio" target="_blank" rel="noopener noreferrer" class="btn-neo bg-[#855DCD] text-white border-white hover:brightness-110 justify-center h-12" title="Farcaster">
-                            <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+                            <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M18.24.24H5.76C2.5789.24 0 2.8188 0 6v12c0 3.1811 2.5789 5.76 5.76 5.76h12.48c3.1812 0 5.76-2.5789 5.76-5.76V6C24 2.8188 21.4212.24 18.24.24m.8155 17.1662v.504c.2868-.0256.5458.1905.5439.479v.5688h-5.1437v-.5688c-.0019-.2885.2576-.5047.5443-.479v-.504c0-.22.1525-.402.358-.458l-.0095-4.3645c-.1589-1.7366-1.6402-3.0979-3.4435-3.0979-1.8038 0-3.2846 1.3613-3.4435 3.0979l-.0096 4.3578c.2276.0424.5318.2083.5395.4648v.504c.2863-.0256.5457.1905.5438.479v.5688H4.3915v-.5688c-.0019-.2885.2575-.5047.5438-.479v-.504c0-.2529.2011-.4548.4536-.4724v-7.895h-.4905L4.2898 7.008l2.6405-.0005V5.0419h9.9495v1.9656h2.8219l-.6091 2.0314h-.4901v7.8949c.2519.0177.453.2195.453.4724"/></svg>
                         </a>
                     </div>
                 </div>
@@ -769,7 +853,12 @@
             setInterval(showRandomSkin, 1000);
         })();
     </script>
+    <!-- Toast Notification Container -->
+    <div id="toast-container" class="fixed top-4 right-4 z-[9999] flex flex-col gap-2 pointer-events-none" style="max-width: 340px;"></div>
+
     <script src="/socket.io/socket.io.js"></script>
     <script type="module" src="/client/main.js"></script>
+    <script type="module" src="/client/wallet-reown.js"></script>
+    <script src="/client/betting.js"></script>
 </body>
 </html>

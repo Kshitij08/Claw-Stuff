@@ -10,9 +10,10 @@ import {
   MAX_PLAYERS,
   TICK_INTERVAL,
 } from '../../shared/constants.js';
+import * as bettingService from '../betting/service.js';
 
-// In local/test mode (non-production), skip the 60s lobby countdown
-const EFFECTIVE_LOBBY_DURATION = process.env.NODE_ENV === 'production' ? LOBBY_DURATION : 0;
+// In local/test mode use 60s start cooldown; production uses LOBBY_DURATION (also 60s)
+const EFFECTIVE_LOBBY_DURATION = process.env.NODE_ENV === 'production' ? LOBBY_DURATION : 60 * 1000;
 
 export class MatchManager {
   private engine: GameEngine;
@@ -22,6 +23,9 @@ export class MatchManager {
   private nextMatchId: number = 1;
   private scheduleTimer: NodeJS.Timeout | null = null;
   private lobbyStartTimeout: NodeJS.Timeout | null = null;
+  private bettingCloseTimeout: NodeJS.Timeout | null = null;
+  private bettingOpenTimeout: NodeJS.Timeout | null = null;
+  private bettingOpenedOnChain: boolean = false; // true once openBetting tx has been sent
   private resultsTimeout: NodeJS.Timeout | null = null;
   private currentMatchStartTime: number = 0;
   private nextMatchStartTime: number = 0;
@@ -69,6 +73,15 @@ export class MatchManager {
       clearTimeout(this.lobbyStartTimeout);
       this.lobbyStartTimeout = null;
     }
+    if (this.bettingCloseTimeout) {
+      clearTimeout(this.bettingCloseTimeout);
+      this.bettingCloseTimeout = null;
+    }
+    if (this.bettingOpenTimeout) {
+      clearTimeout(this.bettingOpenTimeout);
+      this.bettingOpenTimeout = null;
+    }
+    this.bettingOpenedOnChain = false;
     if (this.resultsTimeout) {
       clearTimeout(this.resultsTimeout);
       this.resultsTimeout = null;
@@ -89,6 +102,15 @@ export class MatchManager {
       clearTimeout(this.lobbyStartTimeout);
       this.lobbyStartTimeout = null;
     }
+    if (this.bettingCloseTimeout) {
+      clearTimeout(this.bettingCloseTimeout);
+      this.bettingCloseTimeout = null;
+    }
+    if (this.bettingOpenTimeout) {
+      clearTimeout(this.bettingOpenTimeout);
+      this.bettingOpenTimeout = null;
+    }
+    this.bettingOpenedOnChain = false;
     if (this.resultsTimeout) {
       clearTimeout(this.resultsTimeout);
       this.resultsTimeout = null;
@@ -116,9 +138,72 @@ export class MatchManager {
     // NOTE: Match start will be scheduled when the first player joins.
   }
 
+  /**
+   * Debounced betting open: waits 5s after the last player join before sending
+   * a single openBetting tx with ALL agents. If a new player joins within
+   * that window, the timer resets. This avoids multiple addAgents txs.
+   */
+  private scheduleBettingOpen(match: ReturnType<typeof this.engine.getMatch>): void {
+    if (!match) return;
+    const DEBOUNCE_MS = 5_000;
+
+    // Gather all current agent names for the DB + emit (instant UI update)
+    const allAgentNames = Array.from(match.snakes.values()).map(s => {
+      const p = this.players.get(s.id);
+      return p?.agentInfo.name ?? s.name;
+    });
+
+    if (!this.bettingOpenedOnChain) {
+      // Haven't sent the on-chain tx yet – debounce it
+      if (this.bettingOpenTimeout) clearTimeout(this.bettingOpenTimeout);
+
+      // Update DB + emit immediately so the UI shows all agents right away
+      bettingService.openBettingForMatch(match.id, allAgentNames, false).catch(() => {});
+
+      this.bettingOpenTimeout = setTimeout(() => {
+        this.bettingOpenTimeout = null;
+        this.bettingOpenedOnChain = true;
+        // Gather agents one final time in case more joined during debounce
+        const finalMatch = this.engine.getMatch();
+        if (!finalMatch) return;
+        const finalNames = Array.from(finalMatch.snakes.values()).map(s => {
+          const p = this.players.get(s.id);
+          return p?.agentInfo.name ?? s.name;
+        });
+        // Update DB with final list, then send single on-chain tx
+        bettingService.openBettingForMatch(finalMatch.id, finalNames, true).catch(() => {});
+      }, DEBOUNCE_MS);
+    } else {
+      // openBetting already sent on-chain – add this agent via addAgents
+      bettingService.addBettingAgent(match.id, allAgentNames[allAgentNames.length - 1]).catch(() => {});
+    }
+  }
+
   private startMatch(): void {
     const match = this.engine.getMatch();
     if (!match) return;
+
+    // If debounced betting open hasn't fired yet, fire it now
+    if (this.bettingOpenTimeout) {
+      clearTimeout(this.bettingOpenTimeout);
+      this.bettingOpenTimeout = null;
+    }
+    if (!this.bettingOpenedOnChain && match.snakes.size >= 2) {
+      this.bettingOpenedOnChain = true;
+      const allNames = Array.from(match.snakes.values()).map(s => {
+        const p = this.players.get(s.id);
+        return p?.agentInfo.name ?? s.name;
+      });
+      bettingService.openBettingForMatch(match.id, allNames, true).catch(() => {});
+    }
+
+    // Close betting if it wasn't already closed by the early timeout
+    bettingService.closeBettingForMatch(match.id).catch(() => {});
+
+    if (this.bettingCloseTimeout) {
+      clearTimeout(this.bettingCloseTimeout);
+      this.bettingCloseTimeout = null;
+    }
 
     console.log(`Starting match ${match.id} with ${match.snakes.size} players`);
     this.engine.startMatch(MATCH_DURATION);
@@ -201,6 +286,27 @@ export class MatchManager {
       winnerAgentName: winnerAgentName,
       endedAt,
       finalScores: finalScoresForDb,
+    }).catch(() => {});
+
+    // ── Resolve betting ────────────────────────────────────────────────
+    // Detect draws: multiple agents with top survival time
+    const topSurvival = withSurvival.length > 0 ? withSurvival[0].survivalMs : 0;
+    const drawThresholdMs = 50; // consider equal if within 50ms
+    const winners = withSurvival.filter(e => Math.abs(e.survivalMs - topSurvival) <= drawThresholdMs);
+    const isDraw = winners.length > 1;
+    const winnerAgentNames = winners.map(w => displayNameToAgent.get(w.name) ?? w.name);
+    // Look up wallet addresses for winner agents (best-effort, may be null)
+    const winnerWalletPromises = winnerAgentNames.map(name =>
+      bettingService.getAgentWallet(name).catch(() => null),
+    );
+    Promise.all(winnerWalletPromises).then(wallets => {
+      const winnerAgentWallets = wallets.map(w => w || '0x0000000000000000000000000000000000000000');
+      bettingService.resolveMatchBetting({
+        matchId: match.id,
+        winnerAgentNames,
+        winnerAgentWallets,
+        isDraw,
+      }).catch(err => console.error('[MatchManager] resolveMatchBetting failed:', err));
     }).catch(() => {});
 
     // Notify spectators (include winner skin + survival time for display)
@@ -322,6 +428,19 @@ export class MatchManager {
       }
       this.lobbyStartTimeout = setTimeout(() => this.startMatch(), EFFECTIVE_LOBBY_DURATION);
 
+      // Close betting 10s before match starts so late bets have time to mine
+      const BETTING_CLOSE_BUFFER = 10_000; // 10 seconds
+      if (EFFECTIVE_LOBBY_DURATION > BETTING_CLOSE_BUFFER) {
+        if (this.bettingCloseTimeout) clearTimeout(this.bettingCloseTimeout);
+        this.bettingCloseTimeout = setTimeout(() => {
+          const m = this.engine.getMatch();
+          if (m) bettingService.closeBettingForMatch(m.id).catch(() => {});
+        }, EFFECTIVE_LOBBY_DURATION - BETTING_CLOSE_BUFFER);
+      }
+
+      // Schedule betting open (debounced – see below)
+      this.scheduleBettingOpen(match);
+
       console.log(
         EFFECTIVE_LOBBY_DURATION > 0
           ? `Second bot joined lobby for ${match.id}. Match will start in ${EFFECTIVE_LOBBY_DURATION / 1000}s (at ${new Date(this.currentMatchStartTime).toISOString()}).`
@@ -329,6 +448,9 @@ export class MatchManager {
       );
     } else if (wasFirst) {
       console.log(`First bot joined lobby for ${match.id}. Waiting for another bot to join before countdown.`);
+    } else if (match.snakes.size >= 2) {
+      // Another player joined – reschedule/extend the debounce so they're included
+      this.scheduleBettingOpen(match);
     }
 
     // Persist agent + match participation (best-effort)

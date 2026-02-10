@@ -8,6 +8,8 @@ import { dirname, join } from 'path';
 
 import { MatchManager } from './game/match.js';
 import { createRoutes } from './api/routes.js';
+import { createBettingRoutes } from './betting/routes.js';
+import { setEmitter } from './betting/service.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -45,6 +47,12 @@ const matchManager = new MatchManager();
 
 // API routes
 app.use('/api', createRoutes(matchManager));
+app.use('/api/betting', createBettingRoutes());
+
+// Wire betting service WebSocket emitter so betting events are broadcast to spectators
+setEmitter((event: string, data: any) => {
+  io.emit(event, data);
+});
 
 // WebSocket connection for spectators
 io.on('connection', (socket) => {
@@ -58,6 +66,30 @@ io.on('connection', (socket) => {
 
   // Send server status
   socket.emit('status', matchManager.getStatus());
+
+  // Handle human bet notification (frontend sends this after successful on-chain tx)
+  socket.on('humanBetPlaced', async (data: {
+    matchId: string;
+    bettorAddress: string;
+    agentName: string;
+    amountWei: string;
+    txHash: string;
+  }) => {
+    try {
+      const { placeBet } = await import('./betting/service.js');
+      await placeBet({
+        bettorAddress: data.bettorAddress,
+        bettorType: 'human',
+        bettorName: null,
+        matchId: data.matchId,
+        agentName: data.agentName,
+        amountWei: data.amountWei,
+        txHash: data.txHash,
+      });
+    } catch (err) {
+      console.error('[ws] humanBetPlaced handler failed:', err);
+    }
+  });
 
   socket.on('disconnect', () => {
     console.log(`Spectator disconnected: ${socket.id}`);

@@ -140,6 +140,7 @@ function updateWalletUI() {
   const connected = document.getElementById('betting-wallet-connected');
   const addrEl = document.getElementById('betting-wallet-addr');
   const balEl = document.getElementById('betting-wallet-balance');
+  const symEl = document.getElementById('betting-wallet-symbol');
 
   if (walletAddress) {
     if (btn) btn.textContent = shortenAddr(walletAddress);
@@ -147,11 +148,25 @@ function updateWalletUI() {
     if (connected) connected.classList.remove('hidden');
     if (addrEl) addrEl.textContent = shortenAddr(walletAddress);
 
-    // Fetch balance
-    if (provider) {
-      provider.getBalance(walletAddress).then(bal => {
-        if (balEl) balEl.textContent = parseFloat(ethers.formatEther(bal)).toFixed(3);
-      }).catch(() => {});
+    const tokenMeta = TOKEN_META[currentBetToken] || TOKEN_META.MON;
+    if (symEl) symEl.textContent = tokenMeta.symbol;
+
+    // Fetch balance for selected token
+    if (provider && balEl) {
+      if (currentBetToken === 'MON') {
+        provider.getBalance(walletAddress).then(bal => {
+          balEl.textContent = parseFloat(ethers.formatEther(bal)).toFixed(3);
+        }).catch(() => {});
+      } else {
+        // MClawIO ERC-20 balance
+        const erc20Abi = [
+          'function balanceOf(address owner) view returns (uint256)',
+        ];
+        const mclaw = new ethers.Contract(MCLAW_TOKEN_ADDRESS, erc20Abi, provider);
+        mclaw.balanceOf(walletAddress).then(bal => {
+          balEl.textContent = parseFloat(ethers.formatUnits(bal, 18)).toFixed(3);
+        }).catch(() => {});
+      }
     }
   }
 }
@@ -264,6 +279,8 @@ window.switchBetToken = function switchBetToken(token) {
       fetchLeaderboard();
     }
   }
+  // Refresh wallet balance + symbol for selected token
+  updateWalletUI();
 };
 
 /* ================================================================

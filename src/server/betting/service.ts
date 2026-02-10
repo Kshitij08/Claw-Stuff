@@ -20,7 +20,7 @@ export interface AgentOdds {
 
 export interface BettingStatus {
   matchId: string;
-  status: 'open' | 'closed' | 'resolved' | 'cancelled' | 'none';
+  status: 'pending' | 'open' | 'closed' | 'resolved' | 'cancelled' | 'none';
   token: Token;
   totalPool: string;
   totalPoolMON: string;
@@ -81,35 +81,47 @@ function weiToMON(wei: string): string {
 
 /**
  * Called when a lobby has 2+ players and betting should open.
- * @param sendOnChain – if false, only update DB + emit (for debounce pre-fire).
- *                      if true, also send the openBetting tx on-chain.
+ * @param sendOnChain – if false, only set DB to 'pending' + emit bettingPending (UI shows agents, no bet yet).
+ *                      if true, send openBetting tx on-chain, then set 'open' and emit bettingOpen only after confirm.
  */
 export async function openBettingForMatch(matchId: string, agentNames: string[], sendOnChain: boolean = true) {
-  // Persist to DB (store agent names so we can show them even before any bets)
+  // Never set DB to 'open' until on-chain openBetting has confirmed (so UI never shows "Bet" too early)
   try {
     await dbQuery(
       `INSERT INTO betting_pools (match_id, status, agent_names)
-       VALUES ($1, 'open', $2)
-       ON CONFLICT (match_id) DO UPDATE SET status = 'open', agent_names = $2`,
+       VALUES ($1, 'pending', $2)
+       ON CONFLICT (match_id) DO UPDATE SET status = 'pending', agent_names = $2`,
       [matchId, agentNames],
     );
   } catch (err) {
     console.error('[betting/service] DB openBettingForMatch failed:', err);
   }
 
-  // On-chain: only when the debounce fires (sendOnChain=true)
   if (sendOnChain) {
-    chain.openBetting(matchId, agentNames).catch(err =>
-      console.error('[betting/service] openBetting chain call failed:', err),
-    );
+    try {
+      await chain.openBetting(matchId, agentNames);
+      // Only after on-chain open is confirmed: set DB 'open' and tell clients they can bet
+      await dbQuery(
+        `UPDATE betting_pools SET status = 'open', agent_names = $2 WHERE match_id = $1`,
+        [matchId, agentNames],
+      );
+      emit('bettingOpen', {
+        matchId,
+        agentNames,
+        contractAddress: chain.getContractAddress(),
+        chainInfo: chain.getChainInfo(),
+      });
+    } catch (err) {
+      console.error('[betting/service] openBetting chain call failed:', err);
+    }
+  } else {
+    emit('bettingPending', {
+      matchId,
+      agentNames,
+      contractAddress: chain.getContractAddress(),
+      chainInfo: chain.getChainInfo(),
+    });
   }
-
-  emit('bettingOpen', {
-    matchId,
-    agentNames,
-    contractAddress: chain.getContractAddress(),
-    chainInfo: chain.getChainInfo(),
-  });
 }
 
 /**

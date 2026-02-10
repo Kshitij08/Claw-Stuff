@@ -303,7 +303,7 @@ function renderBettingUI(status) {
   // Phase badge
   const phaseEl = document.getElementById('betting-phase-badge');
   if (phaseEl) {
-    const labels = { open: 'OPEN', closed: 'LOCKED', resolved: 'SETTLED', cancelled: 'CANCELLED', none: '--' };
+    const labels = { pending: 'OPENING…', open: 'OPEN', closed: 'LOCKED', resolved: 'SETTLED', cancelled: 'CANCELLED', none: '--' };
     phaseEl.textContent = labels[status.status] || '--';
   }
 
@@ -337,7 +337,7 @@ function renderBettingUI(status) {
   if (!list) return;
 
   if (!status.agents.length) {
-    if (status.status === 'none' || status.status === 'open') {
+    if (status.status === 'none' || status.status === 'open' || status.status === 'pending') {
       list.innerHTML = '<div class="text-center text-sm font-bold text-slate-400 py-10 bg-slate-800 border-2 border-dashed border-slate-600">Waiting for players...</div>';
     }
     return;
@@ -411,6 +411,10 @@ window.placeBetOnAgent = async function placeBetOnAgent(agentName, inputIndex) {
 
   if (!currentMatchId) {
     showToast('No active match to bet on', 'error');
+    return;
+  }
+  if (currentBettingStatus && currentBettingStatus.status !== 'open') {
+    showToast('Betting is not open on-chain yet. Wait for the panel to show OPEN.', 'error');
     return;
   }
 
@@ -654,11 +658,36 @@ function initBettingSocket() {
       if (claimSection) claimSection.classList.add('hidden');
     });
 
-    // Betting opened
+    // Betting opening (on-chain not confirmed yet – show agents, no bet button)
+    socket.on('bettingPending', (data) => {
+      currentMatchId = data.matchId;
+      showToast('Opening betting… Place your bet once the panel shows OPEN.', 'info');
+      if (data.agentNames && data.agentNames.length) {
+        const placeholder = {
+          matchId: data.matchId,
+          status: 'pending',
+          totalPool: '0',
+          totalPoolMON: '0',
+          agents: data.agentNames.map(name => ({
+            agentName: name,
+            pool: '0',
+            poolMON: '0',
+            percentage: 0,
+            multiplier: 0,
+            bettorCount: 0,
+          })),
+          bettorCount: 0,
+        };
+        currentBettingStatus = placeholder;
+        renderBettingUI(placeholder);
+      }
+      setTimeout(() => fetchBettingStatus(data.matchId), 500);
+    });
+
+    // Betting opened on-chain – users can place bets
     socket.on('bettingOpen', (data) => {
       currentMatchId = data.matchId;
       showToast(`Betting is open for ${data.matchId}!`, 'info');
-      // Immediately render agent cards from the event data (no bets yet)
       if (data.agentNames && data.agentNames.length) {
         const placeholder = {
           matchId: data.matchId,
@@ -678,7 +707,6 @@ function initBettingSocket() {
         currentBettingStatus = placeholder;
         renderBettingUI(placeholder);
       }
-      // Also fetch from server (will have full data once DB is updated)
       setTimeout(() => fetchBettingStatus(data.matchId), 500);
     });
 

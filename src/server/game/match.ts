@@ -12,8 +12,8 @@ import {
 } from '../../shared/constants.js';
 import * as bettingService from '../betting/service.js';
 
-// In local/test mode use 60s start cooldown; production uses LOBBY_DURATION (also 60s)
-const EFFECTIVE_LOBBY_DURATION = process.env.NODE_ENV === 'production' ? LOBBY_DURATION : 60 * 1000;
+// In local/test mode use 90s start cooldown; production uses LOBBY_DURATION (also 90s)
+const EFFECTIVE_LOBBY_DURATION = process.env.NODE_ENV === 'production' ? LOBBY_DURATION : 90 * 1000;
 
 export class MatchManager {
   private engine: GameEngine;

@@ -1,6 +1,6 @@
 import { GameEngine } from './engine.js';
 import { Player, MatchResult, AgentInfo, SpectatorGameState, SpectatorMatchEnd } from '../../shared/types.js';
-import { resolveSkinToParts } from '../../shared/skins.js';
+import { resolveSkinToParts, SKIN_PRESETS } from '../../shared/skins.js';
 import { recordAgentJoin, recordMatchEnd, getHighestMatchId } from '../db.js';
 import {
   MATCH_DURATION,
@@ -406,6 +406,15 @@ export class MatchManager {
     // Create player
     const playerId = `player_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const name = displayName || agentInfo.name;
+
+    // If no skin was provided, assign a random preset skin
+    if (!skinId) {
+      const presetIds = Object.keys(SKIN_PRESETS);
+      if (presetIds.length > 0) {
+        const idx = Math.floor(Math.random() * presetIds.length);
+        skinId = presetIds[idx];
+      }
+    }
 
     const snake = this.engine.addPlayer(playerId, name, color, skinId);
     if (!snake) {

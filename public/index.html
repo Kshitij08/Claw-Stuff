@@ -350,7 +350,8 @@
                 <button onclick="switchTab('participate')" id="tab-btn-participate" class="flex-1 py-2 text-xs md:text-sm nav-neo active">PLAY</button>
                 <button onclick="switchTab('skins')" id="tab-btn-skins" class="flex-1 py-2 text-xs md:text-sm nav-neo">SKINS</button>
                 <button onclick="switchTab('market')" id="tab-btn-market" class="flex-1 py-2 text-xs md:text-sm nav-neo">BETS</button>
-                <button onclick="switchTab('token')" id="tab-btn-token" class="flex-1 py-2 text-xs md:text-sm nav-neo">TOKEN</button>
+                <!-- TOKEN tab temporarily disabled until new token is launched -->
+                <!-- <button onclick="switchTab('token')" id="tab-btn-token" class="flex-1 py-2 text-xs md:text-sm nav-neo">TOKEN</button> -->
             </div>
 
             <div class="flex-1 overflow-y-auto p-4 custom-scrollbar relative">
@@ -565,7 +566,7 @@
 
                 </div>
 
-                <!-- ========== TOKEN TAB ========== -->
+                <!-- ========== TOKEN TAB (disabled until new token launch) ========== -->
                 <div id="panel-token" class="hidden space-y-5">
                     <div class="bg-slate-800 p-4 border-2 border-white shadow-[4px_4px_0_black]">
                         <div class="flex items-center gap-3 mb-4">
@@ -731,7 +732,8 @@
         lucide.createIcons();
 
         function switchTab(tabId) {
-            ['participate', 'skins', 'market', 'token'].forEach(id => {
+            // TOKEN tab temporarily removed from navigation until new token address is available
+            ['participate', 'skins', 'market'].forEach(id => {
                 const panel = document.getElementById(`panel-${id}`);
                 const btn = document.getElementById(`tab-btn-${id}`);
                 if (panel) panel.classList.add('hidden');

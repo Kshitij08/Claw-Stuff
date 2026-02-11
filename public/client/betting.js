@@ -347,6 +347,9 @@ function renderBettingUI(status) {
     const color = AGENT_COLORS[i % AGENT_COLORS.length];
     const isOpen = status.status === 'open';
     const multiplierText = agent.multiplier > 0 ? agent.multiplier.toFixed(2) + 'x' : '--';
+    const winRateText = typeof agent.winRate === 'number'
+      ? `${(agent.winRate * 100).toFixed(1)}% win`
+      : 'win% --';
     const tokenMeta = TOKEN_META[status.token || currentBetToken] || TOKEN_META.MON;
     const payoutHint = agent.multiplier > 0 && agent.multiplier < 1
       ? ' (favorite – less than bet back if win)'
@@ -357,7 +360,10 @@ function renderBettingUI(status) {
         <div class="flex items-center justify-between mb-2">
           <div class="flex items-center gap-2">
             <div class="w-4 h-4 border-2 border-white" style="background:${color}"></div>
-            <span class="text-sm font-black text-white uppercase">${escHtml(agent.agentName)}</span>
+            <div class="flex flex-col">
+              <span class="text-sm font-black text-white uppercase">${escHtml(agent.agentName)}</span>
+              <span class="text-[10px] font-bold text-slate-400 leading-tight">${winRateText}</span>
+            </div>
           </div>
           <div class="text-right" title="If this agent wins: you get this many ${tokenMeta.symbol} per 1 ${tokenMeta.symbol} bet${payoutHint}">
             <div class="text-[9px] font-bold text-slate-400 uppercase">Payout</div>

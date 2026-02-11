@@ -2,7 +2,7 @@
  * Betting service – business logic layer between the API / match lifecycle
  * and the on-chain ClawBetting contract.  All state is persisted to Postgres.
  */
-import { dbQuery } from '../db.js';
+import { dbQuery, getGlobalLeaderboard } from '../db.js';
 import * as chain from './contract.js';
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -16,6 +16,7 @@ export interface AgentOdds {
   percentage: number;    // 0-100
   multiplier: number;    // e.g. 2.4 = 2.4x return per 1 MON
   bettorCount: number;
+  winRate?: number;      // historical win rate (0-1, e.g. 0.7 = 70%)
 }
 
 export interface BettingStatus {
@@ -611,6 +612,17 @@ export async function getBettingStatus(matchId: string, token: Token = 'MON'): P
     });
   }
 
+  // Global leaderboard win rates (matches, wins, winRate per agent)
+  const winRateMap = new Map<string, number>();
+  try {
+    const leaderboard = await getGlobalLeaderboard();
+    for (const row of leaderboard.leaderboard) {
+      winRateMap.set(row.agentName, row.winRate);
+    }
+  } catch {
+    // If global leaderboard is unavailable, we just omit winRate
+  }
+
   // Merge: show ALL agents (DB + contract + any with bets)
   const agentSet = new Set<string>([...allAgentNames, ...contractAgentNames, ...betDataMap.keys()]);
   const agents: AgentOdds[] = Array.from(agentSet).map((agentName) => {
@@ -627,6 +639,7 @@ export async function getBettingStatus(matchId: string, token: Token = 'MON'): P
       percentage,
       multiplier,
       bettorCount: data?.bettorCount ?? 0,
+      winRate: winRateMap.get(agentName),
     };
   });
 

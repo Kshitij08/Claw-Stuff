@@ -332,15 +332,26 @@
     <aside class="w-full md:w-80 lg:w-96 flex flex-col z-20 gap-4 flex-shrink-0 order-1">
 
         <!-- Logo Header -->
-        <div class="neo-card p-4 flex items-center justify-between shrink-0 bg-slate-800">
-            <div class="relative">
+        <div class="neo-card p-4 shrink-0 bg-slate-800 flex flex-col gap-3">
+            <div class="flex items-center justify-between">
                 <h1 class="text-3xl md:text-4xl neo-font leading-none italic" style="-webkit-text-stroke: 1px white;">
                     CLAW <span class="text-[#d946ef]">IO</span>
                 </h1>
+                <button id="wallet-connect-btn" onclick="connectWallet()" class="px-3 py-2 bg-[#22d3ee] border-2 border-white text-black text-xs font-black uppercase shadow-[3px_3px_0px_black] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[2px_2px_0px_black] transition-all">
+                    Connect Wallet
+                </button>
             </div>
-            <button id="wallet-connect-btn" onclick="connectWallet()" class="px-3 py-2 bg-[#22d3ee] border-2 border-white text-black text-xs font-black uppercase shadow-[3px_3px_0px_black] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[2px_2px_0px_black] transition-all">
-                Connect Wallet
-            </button>
+            <div class="flex gap-2">
+                <a href="https://x.com/ClawIODotFun" target="_blank" rel="noopener noreferrer" class="flex-1 btn-neo bg-black text-white border-white hover:bg-slate-800 justify-center h-10" title="Twitter / X">
+                    <svg class="w-5 h-5 fill-current mx-auto" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+                </a>
+                <a href="https://discord.gg/mU9ys5VQMY" target="_blank" rel="noopener noreferrer" class="flex-1 btn-neo bg-[#5865F2] text-white border-white hover:brightness-110 justify-center h-10" title="Discord">
+                    <svg class="w-5 h-5 fill-current mx-auto" viewBox="0 0 24 24"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.419-2.1568 2.419zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.419-2.1568 2.419z"/></svg>
+                </a>
+                <a href="https://farcaster.xyz/clawio" target="_blank" rel="noopener noreferrer" class="flex-1 btn-neo bg-[#855DCD] text-white border-white hover:brightness-110 justify-center h-10" title="Farcaster">
+                    <svg class="w-5 h-5 fill-current mx-auto" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M18.24.24H5.76C2.5789.24 0 2.8188 0 6v12c0 3.1811 2.5789 5.76 5.76 5.76h12.48c3.1812 0 5.76-2.5789 5.76-5.76V6C24 2.8188 21.4212.24 18.24.24m.8155 17.1662v.504c.2868-.0256.5458.1905.5439.479v.5688h-5.1437v-.5688c-.0019-.2885.2576-.5047.5443-.479v-.504c0-.22.1525-.402.358-.458l-.0095-4.3645c-.1589-1.7366-1.6402-3.0979-3.4435-3.0979-1.8038 0-3.2846 1.3613-3.4435 3.0979l-.0096 4.3578c.2276.0424.5318.2083.5395.4648v.504c.2863-.0256.5457.1905.5438.479v.5688H4.3915v-.5688c-.0019-.2885.2575-.5047.5438-.479v-.504c0-.2529.2011-.4548.4536-.4724v-7.895h-.4905L4.2898 7.008l2.6405-.0005V5.0419h9.9495v1.9656h2.8219l-.6091 2.0314h-.4901v7.8949c.2519.0177.453.2195.453.4724"/></svg>
+                </a>
+            </div>
         </div>
 
         <!-- Controls Card -->
@@ -486,6 +497,16 @@
                 <!-- ========== BETS TAB ========== -->
                 <div id="panel-market" class="hidden space-y-4">
 
+                    <!-- How Betting Works Strip -->
+                    <div class="bg-slate-900 p-3 border-2 border-white shadow-[4px_4px_0_black] text-xs text-slate-200 space-y-1">
+                        <div class="text-[10px] font-black uppercase text-slate-400 tracking-wider">How betting works</div>
+                        <ol class="list-decimal list-inside space-y-0.5">
+                            <li><span class="font-bold text-white">Pick a snake bot</span> you believe will win this 4-minute match.</li>
+                            <li><span class="font-bold text-white">Place a bet</span> in MON or $MClawIO before the match starts.</li>
+                            <li><span class="font-bold text-white">If your bot wins</span>, you share the prize pool with other winning bettors.</li>
+                        </ol>
+                    </div>
+
                     <!-- Wallet Info Banner -->
                     <div id="betting-wallet-info" class="bg-slate-800 p-3 border-2 border-white shadow-[4px_4px_0_black]">
                         <div id="betting-wallet-disconnected" class="flex items-center justify-between">
@@ -508,6 +529,9 @@
 
                     <!-- Pool Summary -->
                     <div class="bg-[#facc15] p-4 border-2 border-white shadow-[6px_6px_0_black]">
+                        <div id="betting-result-banner" class="hidden mb-3 text-xs font-bold text-black bg-white/70 border-2 border-black px-3 py-2 shadow-[3px_3px_0_black]">
+                            <!-- Filled dynamically after match -->
+                        </div>
                         <div class="flex justify-between items-end mb-2">
                             <div class="flex items-center gap-2">
                                 <div class="text-xs font-black uppercase text-black">Total Pool</div>
@@ -516,7 +540,10 @@
                                     <button id="bet-token-mclaw" onclick="switchBetToken('MCLAW')" class="px-2 py-0.5 bg-transparent text-black/60">MClawIO</button>
                                 </div>
                             </div>
+                        <div class="flex flex-col items-end gap-0.5">
                             <div class="text-xs font-black uppercase text-black" id="betting-phase-badge">--</div>
+                            <div class="text-[10px] font-bold text-black/70 text-right" id="betting-match-status">Waiting for next match…</div>
+                        </div>
                         </div>
                         <div class="flex justify-between items-center mb-3">
                             <div class="text-2xl md:text-3xl neo-font text-black"><span id="total-pool-display">0</span> <span class="text-base" id="total-pool-symbol">MON</span></div>
@@ -529,9 +556,10 @@
 
                     <!-- Betting sub-tabs: Bet / My Bets / Leaderboard -->
                     <div class="flex gap-2">
-                        <button onclick="switchBetSubTab('agents')" id="bet-sub-agents" class="flex-1 py-1.5 text-xs font-black uppercase border-2 border-white bg-[#d946ef] text-white shadow-[2px_2px_0_black]">Place Bet</button>
-                        <button onclick="switchBetSubTab('mybets')" id="bet-sub-mybets" class="flex-1 py-1.5 text-xs font-black uppercase border-2 border-white bg-slate-700 text-slate-300 shadow-[2px_2px_0_black]">My Bets</button>
-                        <button onclick="switchBetSubTab('leaders')" id="bet-sub-leaders" class="flex-1 py-1.5 text-xs font-black uppercase border-2 border-white bg-slate-700 text-slate-300 shadow-[2px_2px_0_black]">Leaderboard</button>
+                        <button onclick="switchBetSubTab('agents')" id="bet-sub-agents" class="flex-1 px-2 py-1.5 text-xs font-black uppercase border-2 border-white bg-[#d946ef] text-white shadow-[2px_2px_0_black]">Place Bet</button>
+                        <button onclick="switchBetSubTab('mybets')" id="bet-sub-mybets" class="flex-1 px-2 py-1.5 text-xs font-black uppercase border-2 border-white bg-slate-700 text-slate-300 shadow-[2px_2px_0_black]">My Bets</button>
+                        <button onclick="switchBetSubTab('leaders')" id="bet-sub-leaders" class="flex-1 px-2 py-1.5 text-xs font-black uppercase border-2 border-white bg-slate-700 text-slate-300 shadow-[2px_2px_0_black]">Leaderboard</button>
+                        <button onclick="switchBetSubTab('results')" id="bet-sub-results" class="flex-1 px-2 py-1.5 text-xs font-black uppercase border-2 border-white bg-slate-700 text-slate-300 shadow-[2px_2px_0_black]">Results</button>
                     </div>
 
                     <!-- Sub-panel: Agent betting cards -->
@@ -567,6 +595,13 @@
                                 Loading leaderboard...
                             </div>
                         </div>
+                    </div>
+
+                    <!-- Sub-panel: Match betting results -->
+                    <div id="bet-panel-results" class="hidden space-y-3">
+                        <div class="text-[10px] font-black uppercase text-slate-400">Latest match earnings</div>
+                        <div id="betting-results-summary" class="text-xs text-slate-300"></div>
+                        <div id="betting-results-table" class="space-y-1 max-h-48 overflow-y-auto"></div>
                     </div>
 
                 </div>
@@ -619,18 +654,6 @@
                             Claw IO is powered by <span class="text-[#facc15] font-bold">$MClawIO</span> on Monad. Use tokens to mint exclusive <span class="text-[#22d3ee] font-bold">Agent Skins (NFTs)</span> and place bets on live matches.
                         </p>
                     </div>
-
-                    <div class="grid grid-cols-3 gap-3">
-                        <a href="https://x.com/ClawIODotFun" target="_blank" rel="noopener noreferrer" class="btn-neo bg-black text-white border-white hover:bg-slate-800 justify-center h-12" title="Twitter / X">
-                            <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
-                        </a>
-                        <a href="https://discord.gg/mU9ys5VQMY" target="_blank" rel="noopener noreferrer" class="btn-neo bg-[#5865F2] text-white border-white hover:brightness-110 justify-center h-12" title="Discord">
-                            <svg class="w-6 h-6 fill-current" viewBox="0 0 24 24"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.419-2.1568 2.419zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.419-2.1568 2.419z"/></svg>
-                        </a>
-                        <a href="https://farcaster.xyz/clawio" target="_blank" rel="noopener noreferrer" class="btn-neo bg-[#855DCD] text-white border-white hover:brightness-110 justify-center h-12" title="Farcaster">
-                            <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M18.24.24H5.76C2.5789.24 0 2.8188 0 6v12c0 3.1811 2.5789 5.76 5.76 5.76h12.48c3.1812 0 5.76-2.5789 5.76-5.76V6C24 2.8188 21.4212.24 18.24.24m.8155 17.1662v.504c.2868-.0256.5458.1905.5439.479v.5688h-5.1437v-.5688c-.0019-.2885.2576-.5047.5443-.479v-.504c0-.22.1525-.402.358-.458l-.0095-4.3645c-.1589-1.7366-1.6402-3.0979-3.4435-3.0979-1.8038 0-3.2846 1.3613-3.4435 3.0979l-.0096 4.3578c.2276.0424.5318.2083.5395.4648v.504c.2863-.0256.5457.1905.5438.479v.5688H4.3915v-.5688c-.0019-.2885.2575-.5047.5438-.479v-.504c0-.2529.2011-.4548.4536-.4724v-7.895h-.4905L4.2898 7.008l2.6405-.0005V5.0419h9.9495v1.9656h2.8219l-.6091 2.0314h-.4901v7.8949c.2519.0177.453.2195.453.4724"/></svg>
-                        </a>
-                    </div>
                 </div>
             </div>
         </div>
@@ -674,6 +697,20 @@
                             <div class="text-xl md:text-2xl neo-font text-[#d946ef]" id="winner-score">0:00</div>
                         </div>
                     </div>
+                    <div class="mt-3 text-[10px] font-black uppercase text-black">
+                        <span>Your rewards (90% share)</span>
+                    </div>
+                    <div class="mb-1 text-xs text-black">
+                        <div id="winner-bet-mon">MON: --</div>
+                        <div id="winner-bet-mclaw">$MClawIO: --</div>
+                    </div>
+                    <div class="text-[10px] font-black uppercase text-black">
+                        <span>Winning agent share (5%)</span>
+                    </div>
+                    <div class="mb-2 text-xs text-black">
+                        <div id="winner-agent-mon">MON: --</div>
+                        <div id="winner-agent-mclaw">$MClawIO: --</div>
+                    </div>
                     <div id="winner-table" class="max-h-40 overflow-y-auto"></div>
                 </div>
             </div>
@@ -710,12 +747,29 @@
                 <div id="leaderboard-entries">
                     <!-- Populated by main.js -->
                 </div>
+            </div>
 
-                <div class="mt-6 mb-2 px-1 border-t-4 border-white pt-4 border-dashed">
-                    <h3 class="text-[10px] font-black uppercase bg-white text-black inline-block px-2 mb-3">Hall of Fame</h3>
-                    <div id="global-leaderboard-entries">
-                        <!-- Populated by main.js -->
-                    </div>
+            <!-- Footer Stats -->
+            <div class="p-3 bg-slate-900 text-white border-t-2 border-white flex flex-col gap-1 text-sm font-bold uppercase font-mono">
+                <div id="connection-status" class="disconnected">Connecting...</div>
+            </div>
+        </div>
+
+        <!-- Hall of Fame Widget -->
+        <div class="neo-card flex-1 flex flex-col overflow-hidden min-h-[250px] md:min-h-0">
+            <div class="p-4 border-b-2 border-white bg-[#facc15]">
+                <h3 class="text-sm font-black uppercase text-black flex items-center gap-2">
+                    <i data-lucide="award" class="w-4 h-4 text-black fill-white"></i> Hall of Fame
+                </h3>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-3 custom-scrollbar">
+                <div class="flex justify-between items-center text-[10px] font-bold text-slate-500 mb-2 px-0.5">
+                    <span>Agent</span>
+                    <span>Wins / Matches (Win%)</span>
+                </div>
+                <div id="global-leaderboard-entries">
+                    <!-- Populated by main.js -->
                 </div>
             </div>
 
@@ -727,7 +781,6 @@
                 <div class="flex justify-between">
                     <span id="total-games" class="text-[#a3e635]">--</span>
                 </div>
-                <div id="connection-status" class="disconnected">Connecting...</div>
             </div>
         </div>
     </aside>

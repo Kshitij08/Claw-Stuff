@@ -470,16 +470,6 @@ export class MatchManager {
       this.scheduleBettingOpen(match);
     }
 
-    // Persist agent + match participation (best-effort)
-    recordAgentJoin({
-      agentName: agentInfo.name,
-      apiKey,
-      playerId,
-      matchId: match.id,
-      color,
-      skinId: skinId ?? undefined,
-    }).catch(() => {});
-
     const timeUntilStart = Math.max(0, this.currentMatchStartTime - Date.now());
 
     // Notify listeners (e.g. WebSocket spectators) that status changed (playerCount)

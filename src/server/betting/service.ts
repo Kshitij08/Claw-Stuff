@@ -307,20 +307,42 @@ export async function resolveMatchBetting(opts: {
     await closeBettingForMatch(matchId);
   }
 
-  const totalPool = BigInt(pool.total_pool || '0');
-  if (totalPool === 0n) {
-    // Nothing wagered – just mark resolved
+  // total_pool in DB is MON-only (we don't update it for MCLAW). So check if there are ANY bets (MON or MCLAW).
+  const anyBetsRows = await dbQuery<{ cnt: string }>(
+    `SELECT COUNT(*)::text AS cnt FROM bets WHERE match_id = $1`,
+    [matchId],
+  );
+  const hasAnyBets = parseInt(anyBetsRows[0]?.cnt || '0', 10) > 0;
+
+  if (!hasAnyBets) {
+    // Truly no bets – just mark resolved, no on-chain resolve needed
     await dbQuery(
       `UPDATE betting_pools SET status = 'resolved', winner_agent_names = $2, is_draw = $3, resolved_at = NOW()
        WHERE match_id = $1`,
       [matchId, winnerAgentNames, isDraw],
     );
-    emit('bettingResolved', { matchId, totalPool: '0', totalPoolMON: '0', winners: winnerAgentNames, isDraw, noBetsOnWinner: false, payoutMultiplier: 0 });
+    emit('bettingResolved', { matchId, totalPool: '0', totalPoolMON: '0', totalPoolMclaw: '0', totalPoolMclawMON: '0', winners: winnerAgentNames, isDraw, noBetsOnWinner: false, payoutMultiplier: 0 });
     return;
   }
 
-  // Resolve on-chain
+  // There are bets (MON and/or MCLAW) – resolve on-chain so both pools are resolved and claimable
   const txHash = await chain.resolveMatch(matchId, winnerAgentNames, winnerAgentWallets);
+  if (!txHash) {
+    console.error(`[betting/service] resolveMatch failed for ${matchId}, skipping DB update and auto-distribute`);
+    return;
+  }
+
+  const totalPool = BigInt(pool.total_pool || '0');
+
+  // Pool totals per token (for display; total_pool in DB is MON-only)
+  const poolByTokenRows = await dbQuery<{ token: string; total: string }>(
+    `SELECT token, COALESCE(SUM(amount), 0)::text AS total FROM bets WHERE match_id = $1 GROUP BY token`,
+    [matchId],
+  );
+  let totalPoolMclaw = 0n;
+  for (const row of poolByTokenRows) {
+    if (row.token === 'MCLAW') totalPoolMclaw = BigInt(row.total || '0');
+  }
 
   // Calculate payouts for DB record
   const treasuryAmount = (totalPool * 500n) / 10000n;
@@ -367,6 +389,8 @@ export async function resolveMatchBetting(opts: {
     matchId,
     totalPool: totalPool.toString(),
     totalPoolMON: weiToMON(totalPool.toString()),
+    totalPoolMclaw: totalPoolMclaw.toString(),
+    totalPoolMclawMON: weiToMON(totalPoolMclaw.toString()),
     winners: winnerAgentNames,
     isDraw,
     noBetsOnWinner,
@@ -503,7 +527,7 @@ async function autoDistributeWinnings(matchId: string, winnerAgentNames: string[
               `UPDATE betting_leaderboard SET
                  total_wins = total_wins + 1,
                  total_payout = total_payout + $2
-               WHERE bettor_address = $1`,
+               WHERE bettor_address = $1 AND token = 'MON'`,
               [addr, monAmount],
             );
           } catch (dbErr) {
@@ -538,7 +562,7 @@ async function autoDistributeWinnings(matchId: string, winnerAgentNames: string[
               `UPDATE betting_leaderboard SET
                  total_wins = total_wins + 1,
                  total_payout = total_payout + $2
-               WHERE bettor_address = $1`,
+               WHERE bettor_address = $1 AND token = 'MCLAW'`,
               [addr, mclawAmount],
             );
           } catch (dbErr) {

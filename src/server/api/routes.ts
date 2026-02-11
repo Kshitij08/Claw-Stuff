@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { MatchManager } from '../game/match.js';
-import { getAgentSkins, getGlobalLeaderboard } from '../db.js';
+import { getAgentSkins, getGlobalLeaderboard, recordAgentJoin } from '../db.js';
 import { verifyMoltbookAgent, createTestAgent, checkRateLimit } from './auth.js';
 import {
   JoinRequest,
@@ -63,6 +63,15 @@ export function createRoutes(matchManager: MatchManager): Router {
 
     const body = req.body as JoinRequest;
 
+    // Sanitize optional strategy tag: trim, collapse whitespace, cap length
+    let strategyTag: string | undefined;
+    if (typeof body.strategyTag === 'string') {
+      const trimmed = body.strategyTag.trim().replace(/\s+/g, ' ');
+      if (trimmed.length > 0) {
+        strategyTag = trimmed.slice(0, 30);
+      }
+    }
+
     // Resolve skin: custom bodyId/eyesId/mouthId combo, or preset skinId (must be owned).
     let storedSkinId: string;
     if (body.bodyId != null && body.eyesId != null && body.mouthId != null) {
@@ -106,6 +115,17 @@ export function createRoutes(matchManager: MatchManager): Router {
       res.status(400).json(result);
       return;
     }
+
+    // Persist agent + match participation (best-effort)
+    recordAgentJoin({
+      agentName: agentInfo.name,
+      apiKey,
+      playerId: result.playerId!,
+      matchId: result.matchId!,
+      color: body.color,
+      skinId: storedSkinId ?? undefined,
+      strategyTag,
+    }).catch(() => {});
 
     res.json(result);
   });

@@ -219,7 +219,7 @@ export function createBettingRoutes(): Router {
   });
 
   // ── GET /api/betting/bets-by-wallet/:address ────────────────────────
-  // No auth. Returns all bets for a wallet address, optionally filtered by matchId.
+  // No auth. Returns bets and stats per token (MON and MCLAW) so the frontend never mixes them.
   router.get('/bets-by-wallet/:address', async (req: Request, res: Response) => {
     const address = req.params.address;
     if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
@@ -228,12 +228,16 @@ export function createBettingRoutes(): Router {
     }
     try {
       const matchId = typeof req.query.matchId === 'string' ? req.query.matchId : undefined;
-      const token = req.query.token === 'MCLAW' ? 'MCLAW' : undefined;
-      const [bets, stats] = await Promise.all([
-        bettingService.getUserBets(address, matchId, token),
-        bettingService.getWalletStats(address, token),
+      const [betsMON, betsMCLAW, statsMON, statsMCLAW] = await Promise.all([
+        bettingService.getUserBets(address, matchId, 'MON'),
+        bettingService.getUserBets(address, matchId, 'MCLAW'),
+        bettingService.getWalletStats(address, 'MON'),
+        bettingService.getWalletStats(address, 'MCLAW'),
       ]);
-      res.json({ bets, stats });
+      res.json({
+        betsByToken: { MON: betsMON, MCLAW: betsMCLAW },
+        statsByToken: { MON: statsMON, MCLAW: statsMCLAW },
+      });
     } catch (err) {
       console.error('[betting/routes] /bets-by-wallet failed:', err);
       res.status(500).json({ success: false, error: 'INTERNAL_ERROR' });

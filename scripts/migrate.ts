@@ -51,6 +51,12 @@ async function main() {
         ADD COLUMN IF NOT EXISTS skin_id TEXT;
     `);
 
+    // Optional per-match strategy tag chosen when joining (1–2 words)
+    await client.query(`
+      ALTER TABLE match_players
+        ADD COLUMN IF NOT EXISTS strategy_tag TEXT;
+    `);
+
     // Agent skins table: tracks which skins each agent owns
     await client.query(`
       CREATE TABLE IF NOT EXISTS agent_skins (
@@ -77,6 +83,12 @@ async function main() {
     await client.query(`
       ALTER TABLE agents
         ADD COLUMN IF NOT EXISTS wallet_address TEXT;
+    `);
+
+    // Optional long-lived strategy tag per agent (latest preference)
+    await client.query(`
+      ALTER TABLE agents
+        ADD COLUMN IF NOT EXISTS strategy_tag TEXT;
     `);
 
     // ── Betting pools: one row per match that has betting ──────────────

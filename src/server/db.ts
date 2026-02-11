@@ -65,6 +65,7 @@ export async function recordAgentJoin(opts: {
   matchId: string;
   color?: string;
   skinId?: string;
+  strategyTag?: string;
 }) {
   try {
     // Ensure the match exists in the database before inserting into match_players
@@ -75,21 +76,23 @@ export async function recordAgentJoin(opts: {
       INSERT INTO agents (name, api_key)
       VALUES ($1, $2)
       ON CONFLICT (name) DO UPDATE
-      SET api_key = EXCLUDED.api_key;
+      SET api_key = EXCLUDED.api_key,
+          strategy_tag = COALESCE(EXCLUDED.strategy_tag, agents.strategy_tag);
     `,
-      [opts.agentName, opts.apiKey],
+      [opts.agentName, opts.apiKey, opts.strategyTag ?? null],
     );
 
     await dbQuery(
       `
-      INSERT INTO match_players (match_id, player_id, agent_name, color, skin_id)
-      VALUES ($1, $2, $3, $4, $5)
+      INSERT INTO match_players (match_id, player_id, agent_name, color, skin_id, strategy_tag)
+      VALUES ($1, $2, $3, $4, $5, $6)
       ON CONFLICT (match_id, agent_name) DO UPDATE
       SET player_id = EXCLUDED.player_id,
           color     = COALESCE(EXCLUDED.color, match_players.color),
-          skin_id   = COALESCE(EXCLUDED.skin_id, match_players.skin_id);
+          skin_id   = COALESCE(EXCLUDED.skin_id, match_players.skin_id),
+          strategy_tag = COALESCE(EXCLUDED.strategy_tag, match_players.strategy_tag);
     `,
-      [opts.matchId, opts.playerId, opts.agentName, opts.color ?? null, opts.skinId ?? null],
+      [opts.matchId, opts.playerId, opts.agentName, opts.color ?? null, opts.skinId ?? null, opts.strategyTag ?? null],
     );
   } catch (err) {
     console.error('[db] recordAgentJoin failed:', err);
@@ -141,6 +144,7 @@ export type GlobalLeaderboardRow = {
   matches: number;
   wins: number;
   winRate: number;
+  strategyTag?: string | null;
 };
 
 export async function getGlobalLeaderboard(): Promise<{
@@ -164,34 +168,74 @@ export async function getGlobalLeaderboard(): Promise<{
     );
     const totalGames = totalGamesRows.length ? parseInt(totalGamesRows[0].count, 10) : 0;
 
-    const rows = await dbQuery<{
-      agent_name: string;
-      matches_played: string;
-      wins: string;
-    }>(
-      `
-      SELECT
-        mp.agent_name,
-        COUNT(DISTINCT mp.match_id)::text AS matches_played,
-        COALESCE(SUM(CASE WHEN m.winner_name = mp.agent_name THEN 1 ELSE 0 END), 0)::text AS wins
-      FROM match_players mp
-      JOIN matches m ON m.id = mp.match_id
-      GROUP BY mp.agent_name
-      HAVING COUNT(DISTINCT mp.match_id) > 0;
-    `,
-    );
+    let leaderboard: GlobalLeaderboardRow[] = [];
 
-    const leaderboard: GlobalLeaderboardRow[] = rows.map((row) => {
-      const matches = parseInt(row.matches_played, 10) || 0;
-      const wins = parseInt(row.wins, 10) || 0;
-      const winRate = matches > 0 ? wins / matches : 0;
-      return {
-        agentName: row.agent_name,
-        matches,
-        wins,
-        winRate,
-      };
-    });
+    // First try the extended query that includes strategy_tag.
+    try {
+      const rowsWithTag = await dbQuery<{
+        agent_name: string;
+        matches_played: string;
+        wins: string;
+        strategy_tag: string | null;
+      }>(
+        `
+        SELECT
+          mp.agent_name,
+          COUNT(DISTINCT mp.match_id)::text AS matches_played,
+          COALESCE(SUM(CASE WHEN m.winner_name = mp.agent_name THEN 1 ELSE 0 END), 0)::text AS wins,
+          MAX(mp.strategy_tag) AS strategy_tag
+        FROM match_players mp
+        JOIN matches m ON m.id = mp.match_id
+        GROUP BY mp.agent_name
+        HAVING COUNT(DISTINCT mp.match_id) > 0;
+      `,
+      );
+
+      leaderboard = rowsWithTag.map((row) => {
+        const matches = parseInt(row.matches_played, 10) || 0;
+        const wins = parseInt(row.wins, 10) || 0;
+        const winRate = matches > 0 ? wins / matches : 0;
+        return {
+          agentName: row.agent_name,
+          matches,
+          wins,
+          winRate,
+          strategyTag: row.strategy_tag,
+        };
+      });
+    } catch (err) {
+      // Backward‑compatible fallback for older schemas without strategy_tag.
+      console.warn('[db] getGlobalLeaderboard: strategy_tag column missing, falling back to legacy query');
+      const rowsLegacy = await dbQuery<{
+        agent_name: string;
+        matches_played: string;
+        wins: string;
+      }>(
+        `
+        SELECT
+          mp.agent_name,
+          COUNT(DISTINCT mp.match_id)::text AS matches_played,
+          COALESCE(SUM(CASE WHEN m.winner_name = mp.agent_name THEN 1 ELSE 0 END), 0)::text AS wins
+        FROM match_players mp
+        JOIN matches m ON m.id = mp.match_id
+        GROUP BY mp.agent_name
+        HAVING COUNT(DISTINCT mp.match_id) > 0;
+      `,
+      );
+
+      leaderboard = rowsLegacy.map((row) => {
+        const matches = parseInt(row.matches_played, 10) || 0;
+        const wins = parseInt(row.wins, 10) || 0;
+        const winRate = matches > 0 ? wins / matches : 0;
+        return {
+          agentName: row.agent_name,
+          matches,
+          wins,
+          winRate,
+          strategyTag: null,
+        };
+      });
+    }
 
     // Sort by winRate desc, then by matches desc, then name
     leaderboard.sort((a, b) => {

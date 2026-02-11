@@ -20,6 +20,8 @@ export interface Snake {
   color: string;
   /** Identifier of the visual skin used for this snake */
   skinId: string;
+  /** Optional 1–2 word strategy tag chosen by the agent (e.g. "Balanced", "Hunter") */
+  strategyTag?: string;
   segments: Segment[];
   angle: number; // Direction in degrees (0 = right, 90 = down, 180 = left, 270 = up)
   speed: number;
@@ -105,6 +107,8 @@ export interface JoinRequest {
   bodyId?: string;
   eyesId?: string;
   mouthId?: string;
+  /** Optional 1–2 word strategy tag for personality (e.g. "Balanced", "Hunter") */
+  strategyTag?: string;
 }
 
 export interface JoinResponse {

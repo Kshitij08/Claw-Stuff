@@ -178,13 +178,24 @@ socket.on('matchEnd', (result) => {
 
 function showWaitingScreen(match) {
   waitingScreen.style.display = 'flex';
-  winnerScreen.style.display = 'none';
 
   // No countdown until second bot joins (startsAt is 0)
   if (!match.startsAt || match.startsAt === 0) {
-    countdownEl.textContent = 'Waiting for 2nd bot…';
+    // Extract numeric part from match id like "match_648"
+    let labelId = '';
+    if (typeof match.id === 'string') {
+      const m = /^match_(\d+)$/.exec(match.id);
+      labelId = m ? m[1] : match.id;
+    }
+    countdownEl.textContent =
+      labelId ? `Match ${labelId} \nstarting soon…` : 'Match starting soon…';
+    // Reduce font size for text (smaller than countdown numbers)
+    countdownEl.style.fontSize = '4rem';
     return;
   }
+  
+  // Reset to default large size for countdown numbers
+  countdownEl.style.fontSize = '';
 
   const updateCountdown = () => {
     const now = Date.now();
@@ -290,6 +301,102 @@ function showWinner(result) {
     `;
   } else {
     winnerTableEl.innerHTML = '';
+  }
+
+  // Rewards summary: Your rewards (90%) + Winning agent share (5%)
+  const betMonEl = document.getElementById('winner-bet-mon');
+  const betMclawEl = document.getElementById('winner-bet-mclaw');
+  const agentMonEl = document.getElementById('winner-agent-mon');
+  const agentMclawEl = document.getElementById('winner-agent-mclaw');
+  if (betMonEl && betMclawEl && result.matchId) {
+    betMonEl.textContent = 'MON: --';
+    betMclawEl.textContent = '$MClawIO: --';
+    if (agentMonEl) agentMonEl.textContent = 'MON: --';
+    if (agentMclawEl) agentMclawEl.textContent = '$MClawIO: --';
+
+    const formatWei = (n) => {
+      if (n === 0n) return '0';
+      const whole = n / 1000000000000000000n;
+      const frac = n % 1000000000000000000n;
+      const fracStr = frac.toString().padStart(18, '0').slice(0, 4).replace(/0+$/, '');
+      return fracStr ? `${whole}.${fracStr}` : whole.toString();
+    };
+
+    // Calculate from locally stored bets for instant display
+    const localBets = window.localBetsByMatch && window.localBetsByMatch[result.matchId];
+    const bettingStatus = window.currentBettingStatus;
+    const winnerName = result.winner ? result.winner.name : null;
+
+    if (localBets && Array.isArray(localBets) && localBets.length > 0 && winnerName) {
+      let monTotalPool = 0n;
+      let mclawTotalPool = 0n;
+      let monWinnerPool = 0n;
+      let mclawWinnerPool = 0n;
+      let monBetAmount = 0n;
+      let mclawBetAmount = 0n;
+      let poolFromStatusMon = false;
+      let poolFromStatusMclaw = false;
+
+      if (bettingStatus && bettingStatus.agents && bettingStatus.matchId === result.matchId) {
+        const statusToken = bettingStatus.token === 'MCLAW' ? 'MCLAW' : 'MON';
+        const statusPool = BigInt(bettingStatus.totalPool || '0');
+        let statusWinnerPool = 0n;
+        for (const agent of bettingStatus.agents) {
+          const agentPool = BigInt(agent.pool || '0');
+          if (agent.agentName === winnerName) statusWinnerPool = agentPool;
+        }
+        if (statusToken === 'MCLAW') {
+          mclawTotalPool = statusPool;
+          mclawWinnerPool = statusWinnerPool;
+          poolFromStatusMclaw = true;
+        } else {
+          monTotalPool = statusPool;
+          monWinnerPool = statusWinnerPool;
+          poolFromStatusMon = true;
+        }
+      }
+
+      for (const bet of localBets) {
+        const betWei = BigInt(bet.amountWei || '0');
+        const isWinner = bet.agentName === winnerName;
+        if (bet.token === 'MCLAW') {
+          if (!poolFromStatusMclaw) {
+            mclawTotalPool += betWei;
+            if (isWinner) mclawWinnerPool += betWei;
+          }
+          if (isWinner) mclawBetAmount += betWei;
+        } else {
+          if (!poolFromStatusMon) {
+            monTotalPool += betWei;
+            if (isWinner) monWinnerPool += betWei;
+          }
+          if (isWinner) monBetAmount += betWei;
+        }
+      }
+
+      if (monTotalPool === 0n) monWinnerPool = 0n;
+      if (mclawTotalPool === 0n) mclawWinnerPool = 0n;
+
+      // Your rewards (90% bettor share)
+      let monReward = 0n;
+      let mclawReward = 0n;
+      if (monBetAmount > 0n && monWinnerPool > 0n && monTotalPool > 0n) {
+        const monBettorShare = (monTotalPool * 9000n) / 10000n;
+        monReward = (monBetAmount * monBettorShare) / monWinnerPool;
+      }
+      if (mclawBetAmount > 0n && mclawWinnerPool > 0n && mclawTotalPool > 0n) {
+        const mclawBettorShare = (mclawTotalPool * 9000n) / 10000n;
+        mclawReward = (mclawBetAmount * mclawBettorShare) / mclawWinnerPool;
+      }
+      betMonEl.textContent = `MON: ${formatWei(monReward)}`;
+      betMclawEl.textContent = `$MClawIO: ${formatWei(mclawReward)}`;
+
+      // Winning agent share (5% of total pool per token)
+      const monAgentShare = (monTotalPool * 500n) / 10000n;
+      const mclawAgentShare = (mclawTotalPool * 500n) / 10000n;
+      if (agentMonEl) agentMonEl.textContent = `MON: ${formatWei(monAgentShare)}`;
+      if (agentMclawEl) agentMclawEl.textContent = `$MClawIO: ${formatWei(mclawAgentShare)}`;
+    }
   }
 
   winnerScreen.style.display = 'flex';
@@ -679,11 +786,14 @@ async function fetchGlobalLeaderboard() {
         .map((row, index) => {
           const winRatePct = (row.winRate * 100).toFixed(1);
           const rankBg = index === 0 ? 'bg-[#facc15] text-black' : 'bg-slate-600 text-white';
+          const tag = row.strategyTag ? ` — <span class="text-[10px] uppercase text-lime-300">${escapeHtml(row.strategyTag)}</span>` : '';
           return `
             <div class="flex items-center justify-between text-xs bg-slate-800 p-2 border-2 border-white shadow-[2px_2px_0_black] mb-2">
               <div class="flex items-center gap-2">
                 <span class="${rankBg} w-5 h-5 flex items-center justify-center font-black text-[10px] border border-white">${index + 1}</span>
-                <span class="text-white font-bold">${escapeHtml(row.agentName)}</span>
+                <div class="flex flex-col">
+                  <span class="text-white font-bold">${escapeHtml(row.agentName)}${tag}</span>
+                </div>
               </div>
               <span class="font-bold bg-white text-black px-2 py-0.5 text-[10px]">${row.wins}/${row.matches} (${winRatePct}%)</span>
             </div>

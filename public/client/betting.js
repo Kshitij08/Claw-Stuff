@@ -2,8 +2,8 @@
  * Claw IO – Betting / Prediction Market frontend logic.
  *
  * Handles:
- *  - MetaMask / injected wallet connection (Monad mainnet)
- *  - Placing bets on-chain via ClawBetting contract
+ *  - MetaMask / injected wallet connection (Base mainnet)
+ *  - Placing bets on-chain via ClawBetting contract ($builderarena)
  *  - Real-time odds updates via WebSocket
  *  - Toast notifications
  *  - My bets panel, claim flow, leaderboard
@@ -23,7 +23,8 @@ window.currentBettingStatus = null; // Expose globally for main.js
 let currentMatchId = null;
 // Most recently settled match (for results tab) – tracked via live events only.
 let lastResolvedMatchId = null;
-let currentBetToken = 'MON';     // 'MON' | 'MCLAW'
+// Single token: $builderarena (stored as MCLAW in API/DB)
+let currentBetToken = 'MCLAW';
 
 // Persist typed bet amounts per agent so that re-renders
 // don't wipe all inputs when a single bet is placed.
@@ -47,21 +48,23 @@ try {
   console.warn('Failed to load local bets from localStorage:', e);
 }
 
-// $MClawIO token (Monad) – same CA as TOKEN tab
-const MCLAW_TOKEN_ADDRESS = '0x26813a9B80f43f98cee9045B9f7CdcA816C57777';
+// $builderarena token (Base)
+const BUILDERARENA_TOKEN_ADDRESS = '0xC7584340D6b8444b069DE8c0b526Caa6961C5b07';
 
 const TOKEN_META = {
-  MON:   { symbol: 'MON' },
-  MCLAW: { symbol: 'MClawIO' },
+  MCLAW: { symbol: '$builderarena' },
 };
 
-const MONAD_MAINNET = {
-  chainId: '0x8f',            // 143
-  chainName: 'Monad',
-  rpcUrls: ['https://rpc.monad.xyz'],
-  nativeCurrency: { name: 'MON', symbol: 'MON', decimals: 18 },
-  blockExplorerUrls: ['https://monadvision.com'],
+const BASE_MAINNET = {
+  chainId: '0x2105',          // 8453
+  chainName: 'Base',
+  rpcUrls: ['https://mainnet.base.org'],
+  nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+  blockExplorerUrls: ['https://basescan.org'],
 };
+
+// Set from /api/betting/contract-info for tx links
+let chainExplorer = 'https://basescan.org';
 
 /* ================================================================
    Wallet Connection
@@ -105,17 +108,17 @@ window.connectWallet = async function connectWallet() {
     const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
     walletAddress = accounts[0];
 
-    // Ensure correct chain
+    // Ensure correct chain (Base)
     try {
       await window.ethereum.request({
         method: 'wallet_switchEthereumChain',
-        params: [{ chainId: MONAD_MAINNET.chainId }],
+        params: [{ chainId: BASE_MAINNET.chainId }],
       });
     } catch (switchErr) {
       if (switchErr.code === 4902) {
         await window.ethereum.request({
           method: 'wallet_addEthereumChain',
-          params: [MONAD_MAINNET],
+          params: [BASE_MAINNET],
         });
       } else {
         throw switchErr;
@@ -151,6 +154,7 @@ async function loadContractInfo() {
     const data = await res.json();
     contractAddress = data.contractAddress || '';
     contractABI = data.abi || [];
+    if (data.chain && data.chain.explorer) chainExplorer = data.chain.explorer;
     if (contractAddress && contractABI.length && signer) {
       bettingContract = new ethers.Contract(contractAddress, contractABI, signer);
     }
@@ -176,25 +180,18 @@ function updateWalletUI() {
     if (connected) connected.classList.remove('hidden');
     if (addrEl) addrEl.textContent = shortenAddr(walletAddress);
 
-    const tokenMeta = TOKEN_META[currentBetToken] || TOKEN_META.MON;
+    const tokenMeta = TOKEN_META[currentBetToken] || TOKEN_META.MCLAW;
     if (symEl) symEl.textContent = tokenMeta.symbol;
 
-    // Fetch balance for selected token
+    // Fetch $builderarena ERC-20 balance
     if (provider && balEl) {
-      if (currentBetToken === 'MON') {
-        provider.getBalance(walletAddress).then(bal => {
-          balEl.textContent = parseFloat(ethers.formatEther(bal)).toFixed(3);
-        }).catch(() => {});
-      } else {
-        // MClawIO ERC-20 balance
-        const erc20Abi = [
-          'function balanceOf(address owner) view returns (uint256)',
-        ];
-        const mclaw = new ethers.Contract(MCLAW_TOKEN_ADDRESS, erc20Abi, provider);
-        mclaw.balanceOf(walletAddress).then(bal => {
-          balEl.textContent = parseFloat(ethers.formatUnits(bal, 18)).toFixed(3);
-        }).catch(() => {});
-      }
+      const erc20Abi = [
+        'function balanceOf(address owner) view returns (uint256)',
+      ];
+      const token = new ethers.Contract(BUILDERARENA_TOKEN_ADDRESS, erc20Abi, provider);
+      token.balanceOf(walletAddress).then(bal => {
+        balEl.textContent = parseFloat(ethers.formatUnits(bal, 18)).toFixed(3);
+      }).catch(() => {});
     }
   }
 }
@@ -290,34 +287,16 @@ window.switchBetSubTab = function switchBetSubTab(tab) {
   }
 };
 
-// Switch between MON and MClawIO betting pools
+// Single token ($builderarena); kept for any legacy callers
 window.switchBetToken = function switchBetToken(token) {
-  const normalized = token === 'MCLAW' ? 'MCLAW' : 'MON';
-  currentBetToken = normalized;
-  const btnMon = document.getElementById('bet-token-mon');
-  const btnMclaw = document.getElementById('bet-token-mclaw');
-  if (btnMon && btnMclaw) {
-    if (normalized === 'MON') {
-      btnMon.className = 'px-2 py-0.5 bg-black text-[#facc15]';
-      btnMclaw.className = 'px-2 py-0.5 bg-transparent text-black/60';
-    } else {
-      btnMon.className = 'px-2 py-0.5 bg-transparent text-black/60';
-      btnMclaw.className = 'px-2 py-0.5 bg-black text-[#facc15]';
-    }
-  }
+  currentBetToken = 'MCLAW';
   if (currentMatchId) {
     fetchBettingStatus(currentMatchId);
-    // Refresh per-token views if their tabs are active
     const myBetsPanel = document.getElementById('bet-panel-mybets');
-    if (myBetsPanel && !myBetsPanel.classList.contains('hidden')) {
-      fetchMyBets(currentMatchId);
-    }
+    if (myBetsPanel && !myBetsPanel.classList.contains('hidden')) fetchMyBets(currentMatchId);
     const leadersPanel = document.getElementById('bet-panel-leaders');
-    if (leadersPanel && !leadersPanel.classList.contains('hidden')) {
-      fetchLeaderboard();
-    }
+    if (leadersPanel && !leadersPanel.classList.contains('hidden')) fetchLeaderboard();
   }
-  // Refresh wallet balance + symbol for selected token
   updateWalletUI();
 };
 
@@ -374,7 +353,7 @@ function renderBettingUI(status) {
   if (poolEl) poolEl.textContent = status.totalPoolMON || '0';
   const poolSymbolEl = document.getElementById('total-pool-symbol');
   if (poolSymbolEl) {
-    const meta = TOKEN_META[status.token || currentBetToken] || TOKEN_META.MON;
+    const meta = TOKEN_META[status.token || currentBetToken] || TOKEN_META.MCLAW;
     poolSymbolEl.textContent = meta.symbol;
   }
 
@@ -412,7 +391,7 @@ function renderBettingUI(status) {
     const winRateText = typeof agent.winRate === 'number'
       ? `${(agent.winRate * 100).toFixed(1)}% win`
       : 'win% --';
-    const tokenMeta = TOKEN_META[status.token || currentBetToken] || TOKEN_META.MON;
+    const tokenMeta = TOKEN_META[status.token || currentBetToken] || TOKEN_META.MCLAW;
     const payoutHint = agent.multiplier > 0 && agent.multiplier < 1
       ? ' (favorite – less than bet back if win)'
       : agent.multiplier > 0 ? ` (per 1 ${tokenMeta.symbol} bet back if win)` : '';
@@ -472,7 +451,7 @@ window.updateBetPayoutForAgent = function updateBetPayoutForAgent(index) {
   const raw = input.value;
   const amount = parseFloat(raw || '0');
   const agent = currentBettingStatus.agents[index];
-  const tokenMeta = TOKEN_META[currentBettingStatus.token || currentBetToken] || TOKEN_META.MON;
+  const tokenMeta = TOKEN_META[currentBettingStatus.token || currentBetToken] || TOKEN_META.MCLAW;
 
   if (!raw || isNaN(amount) || amount <= 0 || !agent) {
     if (agent && betInputValues[agent.agentName]) {
@@ -544,31 +523,25 @@ window.placeBetOnAgent = async function placeBetOnAgent(agentName, inputIndex) {
   }
 
   try {
-    const tokenMeta = TOKEN_META[tokenUsed] || TOKEN_META.MON;
+    const tokenMeta = TOKEN_META[tokenUsed] || TOKEN_META.MCLAW;
     showToast(`Placing bet of ${amountTyped} ${tokenMeta.symbol} on ${agentName}...`, 'info');
 
     const matchIdB32 = ethers.encodeBytes32String(currentMatchId.length > 31 ? currentMatchId.slice(0, 31) : currentMatchId);
     const agentIdB32 = ethers.encodeBytes32String(agentName.length > 31 ? agentName.slice(0, 31) : agentName);
 
-    let tx;
-    if (tokenUsed === 'MON') {
-      // Native MON bet
-      tx = await bettingContract.placeBet(matchIdB32, agentIdB32, { value: amountWei });
-    } else {
-      // $MClawIO ERC-20 bet: ensure approval then call placeMclawBet
-      const erc20Abi = [
-        'function allowance(address owner, address spender) view returns (uint256)',
-        'function approve(address spender, uint256 amount) returns (bool)',
-      ];
-      const mclaw = new ethers.Contract(MCLAW_TOKEN_ADDRESS, erc20Abi, signer);
-      const allowance = await mclaw.allowance(walletAddress, contractAddress);
-      if (allowance < amountWei) {
-        showToast(`Approving ${tokenMeta.symbol} for betting contract...`, 'info');
-        const approveTx = await mclaw.approve(contractAddress, amountWei);
-        await approveTx.wait();
-      }
-      tx = await bettingContract.placeMclawBet(matchIdB32, agentIdB32, amountWei);
+    // $builderarena ERC-20 bet: approval then placeBuilderarenaBet
+    const erc20Abi = [
+      'function allowance(address owner, address spender) view returns (uint256)',
+      'function approve(address spender, uint256 amount) returns (bool)',
+    ];
+    const tokenContract = new ethers.Contract(BUILDERARENA_TOKEN_ADDRESS, erc20Abi, signer);
+    const allowance = await tokenContract.allowance(walletAddress, contractAddress);
+    if (allowance < amountWei) {
+      showToast(`Approving ${tokenMeta.symbol} for betting contract...`, 'info');
+      const approveTx = await tokenContract.approve(contractAddress, amountWei);
+      await approveTx.wait();
     }
+    const tx = await bettingContract.placeBuilderarenaBet(matchIdB32, agentIdB32, amountWei);
     showToast(`Transaction submitted. Waiting for confirmation...`, 'info');
 
     const receipt = await tx.wait();
@@ -632,7 +605,7 @@ window.claimWinnings = async function claimWinnings() {
   try {
     showToast('Claiming winnings...', 'info');
     const matchIdB32 = ethers.encodeBytes32String(currentMatchId.length > 31 ? currentMatchId.slice(0, 31) : currentMatchId);
-    const tx = await bettingContract.claim(matchIdB32);
+    const tx = await bettingContract.claimBuilderarena(matchIdB32);
     const receipt = await tx.wait();
     showToast('Winnings claimed successfully!', 'success');
     updateWalletUI();
@@ -670,7 +643,7 @@ async function fetchMyBets(matchId) {
     // ── Stats banner: use stats for the selected token only (backend returns per-token) ──
     let html = '';
     if (stats) {
-      const tokenMeta = TOKEN_META[currentBetToken] || TOKEN_META.MON;
+      const tokenMeta = TOKEN_META[currentBetToken] || TOKEN_META.MCLAW;
       const totalBetWei = BigInt(stats.totalBet || '0');
       const totalPayoutWei = BigInt(stats.totalPayout || '0');
       const profitLossWei = totalPayoutWei - totalBetWei;
@@ -721,14 +694,14 @@ async function fetchMyBets(matchId) {
       html += `<div class="text-[10px] font-black text-slate-400 uppercase mt-2 mb-1">${escHtml(mId)}${isCurrent ? ' (current)' : ''}</div>`;
       html += bets.map(b => {
         const amtMON = weiToMON(b.amount);
-        const tokenMeta = TOKEN_META[currentBetToken] || TOKEN_META.MON;
+        const tokenMeta = TOKEN_META[currentBetToken] || TOKEN_META.MCLAW;
         return `
           <div class="bg-slate-800 border-2 border-white p-2 flex items-center justify-between">
             <div>
               <span class="text-xs font-black text-[#facc15] uppercase">${escHtml(b.agentName)}</span>
               <span class="text-xs text-slate-400 ml-2">${amtMON} ${tokenMeta.symbol}</span>
             </div>
-            ${b.txHash ? `<a href="https://monadvision.com/tx/${b.txHash}" target="_blank" class="text-[10px] text-[#22d3ee] font-mono hover:underline">${b.txHash.slice(0,8)}...</a>` : ''}
+            ${b.txHash ? `<a href="${chainExplorer}/tx/${b.txHash}" target="_blank" class="text-[10px] text-[#22d3ee] font-mono hover:underline">${b.txHash.slice(0,8)}...</a>` : ''}
           </div>
         `;
       }).join('');
@@ -757,7 +730,7 @@ async function fetchLeaderboard() {
       return;
     }
 
-    const tokenMeta = TOKEN_META[currentBetToken] || TOKEN_META.MON;
+    const tokenMeta = TOKEN_META[currentBetToken] || TOKEN_META.MCLAW;
     container.innerHTML = leaders.slice(0, 20).map((e, i) => {
       const rank = i + 1;
       const rankColors = { 1: '#facc15', 2: '#94a3b8', 3: '#f97316' };
@@ -913,7 +886,7 @@ function initBettingSocket() {
       // Don't toast our own bets (already handled)
       if (walletAddress && data.bettorAddress === walletAddress.toLowerCase()) return;
       const name = data.bettorName || shortenAddr(data.bettorAddress);
-      const tokenMeta = TOKEN_META[data.token || 'MON'] || TOKEN_META.MON;
+      const tokenMeta = TOKEN_META[data.token || 'MCLAW'] || TOKEN_META.MCLAW;
       showToast(`${name} bet ${data.amountMON} ${tokenMeta.symbol} on ${data.agentName}`, 'neutral');
     });
 
@@ -926,10 +899,10 @@ function initBettingSocket() {
     // Betting resolved
     socket.on('bettingResolved', (data) => {
       const monPool = data.totalPoolMON || '0';
-      const mclawPool = data.totalPoolMclawMON != null ? data.totalPoolMclawMON : (data.totalPoolMclaw ? weiToMON(data.totalPoolMclaw) : '0');
+      const builderarenaPool = data.totalPoolMclawMON != null ? data.totalPoolMclawMON : (data.totalPoolMclaw ? weiToMON(data.totalPoolMclaw) : '0');
       const parts = [];
       if (parseFloat(monPool) > 0) parts.push(`${monPool} MON`);
-      if (parseFloat(mclawPool) > 0) parts.push(`${mclawPool} MClawIO`);
+      if (parseFloat(builderarenaPool) > 0) parts.push(`${builderarenaPool} $builderarena`);
       const poolStr = parts.length ? parts.join(', ') : '0';
       const msg = data.isDraw
         ? `Draw! ${data.winners.join(' & ')} tied. Pool: ${poolStr}`
@@ -966,7 +939,7 @@ function initBettingSocket() {
     // Auto-distribution: server sends winnings directly to winners
     socket.on('winningsDistributed', (data) => {
       if (walletAddress && data.bettorAddress === walletAddress.toLowerCase()) {
-        const tokenMeta = TOKEN_META[data.token || 'MON'] || TOKEN_META.MON;
+        const tokenMeta = TOKEN_META[data.token || 'MCLAW'] || TOKEN_META.MCLAW;
         const amountLabel = `${data.payoutMON} ${tokenMeta.symbol}`;
         showToast(`You won ${amountLabel}! Auto-sent to your wallet.`, 'success');
         updateWalletUI();
@@ -989,7 +962,7 @@ async function checkClaimable(matchId) {
     if (total > 0n) {
       const parts = [];
       if (monAmount && monAmount > 0n) parts.push(parseFloat(ethers.formatEther(monAmount)).toFixed(4) + ' MON');
-      if (mclawAmount && mclawAmount > 0n) parts.push(parseFloat(ethers.formatEther(mclawAmount)).toFixed(4) + ' MClawIO');
+      if (mclawAmount && mclawAmount > 0n) parts.push(parseFloat(ethers.formatEther(mclawAmount)).toFixed(4) + ' $builderarena');
       const label = parts.join(' + ');
       const claimSection = document.getElementById('claim-section');
       const claimAmount = document.getElementById('claimable-amount');
@@ -1124,7 +1097,7 @@ async function fetchBettingResults(matchId, depth = 0) {
     }
     const baseSummary =
       `Total payouts — MON: ${monTotal > 0n ? formatWei(monTotal) : '--'} | ` +
-      `$MClawIO: ${mclawTotal > 0n ? formatWei(mclawTotal) : '--'}`;
+      `$builderarena: ${mclawTotal > 0n ? formatWei(mclawTotal) : '--'}`;
 
     // Agent 5% share (MON only, from betting_pools.agent_payout)
     let agentLine = '';
@@ -1157,7 +1130,7 @@ async function fetchBettingResults(matchId, depth = 0) {
     });
 
     tableEl.innerHTML = entries.map((e) => {
-      const tokenMeta = TOKEN_META[e.token || 'MON'] || TOKEN_META.MON;
+      const tokenMeta = TOKEN_META[e.token || 'MCLAW'] || TOKEN_META.MCLAW;
       const bettorLabel = e.bettorName || shortenAddr(e.bettorAddress);
       const betStr = e.totalBet > 0n ? formatWei(e.totalBet) : '0';
       const payoutStr = e.totalPayout > 0n ? formatWei(e.totalPayout) : '0';

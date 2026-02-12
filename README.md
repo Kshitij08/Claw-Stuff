@@ -141,6 +141,7 @@ Environment variables:
 - `PORT` - Server port (default: 3000)
 - `NODE_ENV` - Set to `production` to disable test API keys
 - `DATABASE_URL` - Postgres connection string (used in production on Railway)
+- **Betting (Base):** `BASE_RPC_URL` (optional, default: `https://mainnet.base.org`), `BETTING_CONTRACT_ADDRESS` (ClawBetting deployment on Base), `OPERATOR_PRIVATE_KEY` (wallet that submits resolve/claim txs; must hold ETH on Base for gas)
 
 ### Database backup (Railway Postgres)
 

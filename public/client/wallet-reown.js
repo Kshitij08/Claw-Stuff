@@ -21,14 +21,14 @@ async function initReown() {
       const { EthersAdapter } = await import('https://esm.sh/@reown/appkit-adapter-ethers@' + V);
       const { defineChain } = await import('https://esm.sh/viem@2');
 
-      // Monad Mainnet – same shape as shotgun-app (viem defineChain)
-      const monadMainnet = defineChain({
-        id: 143,
-        name: 'Monad',
-        nativeCurrency: { name: 'MON', symbol: 'MON', decimals: 18 },
-        rpcUrls: { default: { http: ['https://rpc.monad.xyz/'] } },
+      // Base Mainnet
+      const baseMainnet = defineChain({
+        id: 8453,
+        name: 'Base',
+        nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+        rpcUrls: { default: { http: ['https://mainnet.base.org'] } },
         blockExplorers: {
-          default: { name: 'MonadVision', url: 'https://monadvision.com' },
+          default: { name: 'BaseScan', url: 'https://basescan.org' },
         },
         testnet: false,
       });
@@ -42,7 +42,7 @@ async function initReown() {
 
       const modal = createAppKit({
         adapters: [new EthersAdapter()],
-        networks: [monadMainnet],
+        networks: [baseMainnet],
         projectId,
         metadata,
         features: {

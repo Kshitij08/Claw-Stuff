@@ -1,5 +1,5 @@
 /**
- * Ethers.js wrapper for the ClawBetting smart contract on Monad mainnet.
+ * Ethers.js wrapper for the ClawBetting smart contract on Base mainnet.
  * All write functions are called by the backend "operator" wallet.
  */
 import { ethers, JsonRpcProvider, Wallet, Contract, encodeBytes32String, decodeBytes32String } from 'ethers';
@@ -21,8 +21,8 @@ try {
 }
 
 // ── Config from env ────────────────────────────────────────────────────
-// Default to Monad mainnet RPC; can be overridden via MONAD_RPC_URL.
-const MONAD_RPC_URL = process.env.MONAD_RPC_URL || 'https://rpc.monad.xyz';
+// Default to Base mainnet RPC; can be overridden via BASE_RPC_URL.
+const BASE_RPC_URL = process.env.BASE_RPC_URL || 'https://mainnet.base.org';
 const OPERATOR_PRIVATE_KEY = process.env.OPERATOR_PRIVATE_KEY || '';
 const BETTING_CONTRACT_ADDRESS = process.env.BETTING_CONTRACT_ADDRESS || '';
 
@@ -40,7 +40,7 @@ function ensureInit() {
     return;
   }
 
-  provider = new JsonRpcProvider(MONAD_RPC_URL);
+  provider = new JsonRpcProvider(BASE_RPC_URL);
 
   // Read-only contract (for view calls even without operator key)
   readContract = new Contract(BETTING_CONTRACT_ADDRESS, CONTRACT_ABI, provider);
@@ -53,7 +53,7 @@ function ensureInit() {
     console.warn('[betting/contract] OPERATOR_PRIVATE_KEY not set – write ops disabled');
   }
 
-  console.log(`[betting/contract] Connected to ${MONAD_RPC_URL}, contract ${BETTING_CONTRACT_ADDRESS}`);
+  console.log(`[betting/contract] Connected to ${BASE_RPC_URL}, contract ${BETTING_CONTRACT_ADDRESS}`);
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -84,10 +84,10 @@ export function getContractABI(): any[] {
 
 export function getChainInfo() {
   return {
-    chainId: 143,
-    rpcUrl: MONAD_RPC_URL,
-    explorer: 'https://monadvision.com',
-    currency: 'MON',
+    chainId: 8453,
+    rpcUrl: BASE_RPC_URL,
+    explorer: 'https://basescan.org',
+    currency: 'ETH',
   };
 }
 
@@ -228,18 +228,18 @@ export function claimFor(bettorAddress: string, matchId: string): Promise<string
   });
 }
 
-export function claimMclawFor(bettorAddress: string, matchId: string): Promise<string | null> {
+export function claimBuilderarenaFor(bettorAddress: string, matchId: string): Promise<string | null> {
   ensureInit();
   if (!contract) return Promise.resolve(null);
   return enqueueOperatorTx(async () => {
     try {
       const nonce = await operatorWallet!.getNonce();
-      const tx = await contract!.claimMclawFor(bettorAddress, toBytes32(matchId), { nonce });
+      const tx = await contract!.claimBuilderarenaFor(bettorAddress, toBytes32(matchId), { nonce });
       const receipt = await tx.wait();
-      console.log(`[betting/contract] claimMclawFor(${bettorAddress}, ${matchId}) tx: ${receipt.hash}`);
+      console.log(`[betting/contract] claimBuilderarenaFor(${bettorAddress}, ${matchId}) tx: ${receipt.hash}`);
       return receipt.hash as string;
     } catch (err) {
-      console.error('[betting/contract] claimMclawFor failed:', err);
+      console.error('[betting/contract] claimBuilderarenaFor failed:', err);
       return null;
     }
   });
@@ -270,9 +270,9 @@ export async function getMatchStatus(matchId: string) {
   try {
     const result = await readContract.getMatchStatus(toBytes32(matchId));
     return {
-      status: Number(result[0]),             // enum MatchStatus
-      totalPoolMon: result[1].toString(),    // bigint → string
-      totalPoolMclaw: result[2].toString(),  // bigint → string
+      status: Number(result[0]),                    // enum MatchStatus
+      totalPoolMon: result[1].toString(),            // bigint → string
+      totalPoolBuilderarena: result[2].toString(),  // bigint → string
       agentIds: (result[3] as string[]).map(fromBytes32),
       winnerAgentIds: (result[4] as string[]).map(fromBytes32),
     };
@@ -304,17 +304,17 @@ export async function getBet(matchId: string, bettor: string, agentName: string)
   }
 }
 
-export async function getClaimableAmounts(matchId: string, bettor: string): Promise<{ monAmount: string; mclawAmount: string }> {
+export async function getClaimableAmounts(matchId: string, bettor: string): Promise<{ monAmount: string; builderarenaAmount: string }> {
   ensureInit();
-  if (!readContract) return { monAmount: '0', mclawAmount: '0' };
+  if (!readContract) return { monAmount: '0', builderarenaAmount: '0' };
   try {
     const result = await readContract.getClaimableAmounts(toBytes32(matchId), bettor);
     return {
       monAmount: result[0].toString(),
-      mclawAmount: result[1].toString(),
+      builderarenaAmount: result[1].toString(),
     };
   } catch {
-    return { monAmount: '0', mclawAmount: '0' };
+    return { monAmount: '0', builderarenaAmount: '0' };
   }
 }
 

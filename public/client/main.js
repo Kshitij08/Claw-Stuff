@@ -310,9 +310,9 @@ function showWinner(result) {
   const agentMclawEl = document.getElementById('winner-agent-mclaw');
   if (betMonEl && betMclawEl && result.matchId) {
     betMonEl.textContent = 'MON: --';
-    betMclawEl.textContent = '$MClawIO: --';
+    betMclawEl.textContent = '$builderarena: --';
     if (agentMonEl) agentMonEl.textContent = 'MON: --';
-    if (agentMclawEl) agentMclawEl.textContent = '$MClawIO: --';
+    if (agentMclawEl) agentMclawEl.textContent = '$builderarena: --';
 
     const formatWei = (n) => {
       if (n === 0n) return '0';
@@ -389,13 +389,13 @@ function showWinner(result) {
         mclawReward = (mclawBetAmount * mclawBettorShare) / mclawWinnerPool;
       }
       betMonEl.textContent = `MON: ${formatWei(monReward)}`;
-      betMclawEl.textContent = `$MClawIO: ${formatWei(mclawReward)}`;
+      betMclawEl.textContent = `$builderarena: ${formatWei(mclawReward)}`;
 
       // Winning agent share (5% of total pool per token)
       const monAgentShare = (monTotalPool * 500n) / 10000n;
       const mclawAgentShare = (mclawTotalPool * 500n) / 10000n;
       if (agentMonEl) agentMonEl.textContent = `MON: ${formatWei(monAgentShare)}`;
-      if (agentMclawEl) agentMclawEl.textContent = `$MClawIO: ${formatWei(mclawAgentShare)}`;
+      if (agentMclawEl) agentMclawEl.textContent = `$builderarena: ${formatWei(mclawAgentShare)}`;
     }
   }
 

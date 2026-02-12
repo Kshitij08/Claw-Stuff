@@ -11,15 +11,15 @@ window.reownReady = false;
 window.reownInitFailed = false;
 window.openReownConnect = null;
 
-const monadMainnet = defineChain({
-  id: 143,
-  caipNetworkId: 'eip155:143',
+const baseMainnet = defineChain({
+  id: 8453,
+  caipNetworkId: 'eip155:8453',
   chainNamespace: 'eip155',
-  name: 'Monad',
-  nativeCurrency: { decimals: 18, name: 'MON', symbol: 'MON' },
-  rpcUrls: { default: { http: ['https://rpc.monad.xyz'] } },
+  name: 'Base',
+  nativeCurrency: { decimals: 18, name: 'Ether', symbol: 'ETH' },
+  rpcUrls: { default: { http: ['https://mainnet.base.org'] } },
   blockExplorers: {
-    default: { name: 'MonadVision', url: 'https://monadvision.com' },
+    default: { name: 'BaseScan', url: 'https://basescan.org' },
   },
 });
 
@@ -39,7 +39,7 @@ async function initReown() {
 
     const modal = createAppKit({
       adapters: [new EthersAdapter()],
-      networks: [monadMainnet],
+        networks: [baseMainnet],
       projectId,
       metadata,
       features: { analytics: false },

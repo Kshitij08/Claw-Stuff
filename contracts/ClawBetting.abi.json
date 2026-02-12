@@ -2,6 +2,24 @@
 	{
 		"inputs": [
 			{
+				"internalType": "bytes32",
+				"name": "matchId",
+				"type": "bytes32"
+			},
+			{
+				"internalType": "bytes32[]",
+				"name": "newAgentIds",
+				"type": "bytes32[]"
+			}
+		],
+		"name": "addAgents",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
 				"internalType": "address",
 				"name": "_treasury",
 				"type": "address"
@@ -23,7 +41,7 @@
 			},
 			{
 				"internalType": "address",
-				"name": "_mclawToken",
+				"name": "_builderarenaToken",
 				"type": "address"
 			}
 		],
@@ -153,6 +171,125 @@
 				"internalType": "bytes32",
 				"name": "matchId",
 				"type": "bytes32"
+			},
+			{
+				"indexed": true,
+				"internalType": "address",
+				"name": "bettor",
+				"type": "address"
+			},
+			{
+				"indexed": true,
+				"internalType": "bytes32",
+				"name": "agentId",
+				"type": "bytes32"
+			},
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "amount",
+				"type": "uint256"
+			}
+		],
+		"name": "BuilderarenaBetPlaced",
+		"type": "event"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "bytes32",
+				"name": "matchId",
+				"type": "bytes32"
+			}
+		],
+		"name": "cancelMatch",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "bytes32",
+				"name": "matchId",
+				"type": "bytes32"
+			}
+		],
+		"name": "claim",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "bytes32",
+				"name": "matchId",
+				"type": "bytes32"
+			}
+		],
+		"name": "claimBuilderarena",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "bettor",
+				"type": "address"
+			},
+			{
+				"internalType": "bytes32",
+				"name": "matchId",
+				"type": "bytes32"
+			}
+		],
+		"name": "claimBuilderarenaFor",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "bettor",
+				"type": "address"
+			},
+			{
+				"internalType": "bytes32",
+				"name": "matchId",
+				"type": "bytes32"
+			}
+		],
+		"name": "claimFor",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "bytes32",
+				"name": "matchId",
+				"type": "bytes32"
+			}
+		],
+		"name": "closeBetting",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": true,
+				"internalType": "bytes32",
+				"name": "matchId",
+				"type": "bytes32"
 			}
 		],
 		"name": "MatchCancelled",
@@ -233,35 +370,22 @@
 		"type": "event"
 	},
 	{
-		"anonymous": false,
 		"inputs": [
 			{
-				"indexed": true,
 				"internalType": "bytes32",
 				"name": "matchId",
 				"type": "bytes32"
 			},
 			{
-				"indexed": true,
-				"internalType": "address",
-				"name": "bettor",
-				"type": "address"
-			},
-			{
-				"indexed": true,
-				"internalType": "bytes32",
-				"name": "agentId",
-				"type": "bytes32"
-			},
-			{
-				"indexed": false,
-				"internalType": "uint256",
-				"name": "amount",
-				"type": "uint256"
+				"internalType": "bytes32[]",
+				"name": "agentIds",
+				"type": "bytes32[]"
 			}
 		],
-		"name": "MclawBetPlaced",
-		"type": "event"
+		"name": "openBetting",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
 	},
 	{
 		"anonymous": false,
@@ -281,513 +405,6 @@
 		],
 		"name": "OwnershipTransferred",
 		"type": "event"
-	},
-	{
-		"anonymous": false,
-		"inputs": [
-			{
-				"indexed": true,
-				"internalType": "bytes32",
-				"name": "matchId",
-				"type": "bytes32"
-			},
-			{
-				"indexed": true,
-				"internalType": "address",
-				"name": "bettor",
-				"type": "address"
-			},
-			{
-				"indexed": false,
-				"internalType": "uint256",
-				"name": "amount",
-				"type": "uint256"
-			}
-		],
-		"name": "WinningsClaimed",
-		"type": "event"
-	},
-	{
-		"inputs": [],
-		"name": "BPS_DENOMINATOR",
-		"outputs": [
-			{
-				"internalType": "uint256",
-				"name": "",
-				"type": "uint256"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [],
-		"name": "TREASURY_BPS",
-		"outputs": [
-			{
-				"internalType": "uint256",
-				"name": "",
-				"type": "uint256"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [],
-		"name": "WINNER_AGENT_BPS",
-		"outputs": [
-			{
-				"internalType": "uint256",
-				"name": "",
-				"type": "uint256"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [],
-		"name": "WINNER_BETTORS_BPS",
-		"outputs": [
-			{
-				"internalType": "uint256",
-				"name": "",
-				"type": "uint256"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"internalType": "bytes32",
-				"name": "matchId",
-				"type": "bytes32"
-			},
-			{
-				"internalType": "bytes32[]",
-				"name": "newAgentIds",
-				"type": "bytes32[]"
-			}
-		],
-		"name": "addAgents",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"internalType": "bytes32",
-				"name": "matchId",
-				"type": "bytes32"
-			}
-		],
-		"name": "cancelMatch",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"internalType": "bytes32",
-				"name": "matchId",
-				"type": "bytes32"
-			}
-		],
-		"name": "claim",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"internalType": "address",
-				"name": "bettor",
-				"type": "address"
-			},
-			{
-				"internalType": "bytes32",
-				"name": "matchId",
-				"type": "bytes32"
-			}
-		],
-		"name": "claimFor",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"internalType": "bytes32",
-				"name": "matchId",
-				"type": "bytes32"
-			}
-		],
-		"name": "claimMclaw",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"internalType": "address",
-				"name": "bettor",
-				"type": "address"
-			},
-			{
-				"internalType": "bytes32",
-				"name": "matchId",
-				"type": "bytes32"
-			}
-		],
-		"name": "claimMclawFor",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"internalType": "bytes32",
-				"name": "matchId",
-				"type": "bytes32"
-			}
-		],
-		"name": "closeBetting",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"internalType": "bytes32",
-				"name": "matchId",
-				"type": "bytes32"
-			},
-			{
-				"internalType": "bytes32",
-				"name": "agentId",
-				"type": "bytes32"
-			}
-		],
-		"name": "getAgentPool",
-		"outputs": [
-			{
-				"internalType": "uint256",
-				"name": "",
-				"type": "uint256"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"internalType": "bytes32",
-				"name": "matchId",
-				"type": "bytes32"
-			},
-			{
-				"internalType": "bytes32",
-				"name": "agentId",
-				"type": "bytes32"
-			}
-		],
-		"name": "getAgentPoolMclaw",
-		"outputs": [
-			{
-				"internalType": "uint256",
-				"name": "",
-				"type": "uint256"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"internalType": "bytes32",
-				"name": "matchId",
-				"type": "bytes32"
-			},
-			{
-				"internalType": "address",
-				"name": "bettor",
-				"type": "address"
-			},
-			{
-				"internalType": "bytes32",
-				"name": "agentId",
-				"type": "bytes32"
-			}
-		],
-		"name": "getBet",
-		"outputs": [
-			{
-				"internalType": "uint256",
-				"name": "",
-				"type": "uint256"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"internalType": "bytes32",
-				"name": "matchId",
-				"type": "bytes32"
-			},
-			{
-				"internalType": "address",
-				"name": "bettor",
-				"type": "address"
-			},
-			{
-				"internalType": "bytes32",
-				"name": "agentId",
-				"type": "bytes32"
-			}
-		],
-		"name": "getBetMclaw",
-		"outputs": [
-			{
-				"internalType": "uint256",
-				"name": "",
-				"type": "uint256"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"internalType": "bytes32",
-				"name": "matchId",
-				"type": "bytes32"
-			}
-		],
-		"name": "getBettorCount",
-		"outputs": [
-			{
-				"internalType": "uint256",
-				"name": "",
-				"type": "uint256"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"internalType": "bytes32",
-				"name": "matchId",
-				"type": "bytes32"
-			},
-			{
-				"internalType": "address",
-				"name": "bettor",
-				"type": "address"
-			}
-		],
-		"name": "getClaimableAmounts",
-		"outputs": [
-			{
-				"internalType": "uint256",
-				"name": "monAmount",
-				"type": "uint256"
-			},
-			{
-				"internalType": "uint256",
-				"name": "mclawAmount",
-				"type": "uint256"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"internalType": "bytes32",
-				"name": "matchId",
-				"type": "bytes32"
-			}
-		],
-		"name": "getMatchStatus",
-		"outputs": [
-			{
-				"internalType": "enum ClawBetting.MatchStatus",
-				"name": "status",
-				"type": "uint8"
-			},
-			{
-				"internalType": "uint256",
-				"name": "totalPoolMon",
-				"type": "uint256"
-			},
-			{
-				"internalType": "uint256",
-				"name": "totalPoolMclaw",
-				"type": "uint256"
-			},
-			{
-				"internalType": "bytes32[]",
-				"name": "agentIds",
-				"type": "bytes32[]"
-			},
-			{
-				"internalType": "bytes32[]",
-				"name": "winnerAgentIds",
-				"type": "bytes32[]"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"internalType": "bytes32",
-				"name": "matchId",
-				"type": "bytes32"
-			},
-			{
-				"internalType": "address",
-				"name": "bettor",
-				"type": "address"
-			}
-		],
-		"name": "hasClaimed",
-		"outputs": [
-			{
-				"internalType": "bool",
-				"name": "",
-				"type": "bool"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"internalType": "bytes32",
-				"name": "matchId",
-				"type": "bytes32"
-			},
-			{
-				"internalType": "address",
-				"name": "bettor",
-				"type": "address"
-			}
-		],
-		"name": "hasClaimedMclaw",
-		"outputs": [
-			{
-				"internalType": "bool",
-				"name": "",
-				"type": "bool"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [],
-		"name": "maxBetAmount",
-		"outputs": [
-			{
-				"internalType": "uint256",
-				"name": "",
-				"type": "uint256"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [],
-		"name": "mclawToken",
-		"outputs": [
-			{
-				"internalType": "contract IERC20",
-				"name": "",
-				"type": "address"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [],
-		"name": "minBetAmount",
-		"outputs": [
-			{
-				"internalType": "uint256",
-				"name": "",
-				"type": "uint256"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"internalType": "bytes32",
-				"name": "matchId",
-				"type": "bytes32"
-			},
-			{
-				"internalType": "bytes32[]",
-				"name": "agentIds",
-				"type": "bytes32[]"
-			}
-		],
-		"name": "openBetting",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
-		"inputs": [],
-		"name": "operator",
-		"outputs": [
-			{
-				"internalType": "address",
-				"name": "",
-				"type": "address"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [],
-		"name": "owner",
-		"outputs": [
-			{
-				"internalType": "address",
-				"name": "",
-				"type": "address"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
 	},
 	{
 		"inputs": [
@@ -825,7 +442,7 @@
 				"type": "uint256"
 			}
 		],
-		"name": "placeMclawBet",
+		"name": "placeBuilderarenaBet",
 		"outputs": [],
 		"stateMutability": "nonpayable",
 		"type": "function"
@@ -918,17 +535,29 @@
 		"type": "function"
 	},
 	{
-		"inputs": [],
-		"name": "treasury",
-		"outputs": [
+		"anonymous": false,
+		"inputs": [
 			{
+				"indexed": true,
+				"internalType": "bytes32",
+				"name": "matchId",
+				"type": "bytes32"
+			},
+			{
+				"indexed": true,
 				"internalType": "address",
-				"name": "",
+				"name": "bettor",
 				"type": "address"
+			},
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "amount",
+				"type": "uint256"
 			}
 		],
-		"stateMutability": "view",
-		"type": "function"
+		"name": "WinningsClaimed",
+		"type": "event"
 	},
 	{
 		"inputs": [
@@ -959,6 +588,377 @@
 		"name": "withdrawAll",
 		"outputs": [],
 		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "BPS_DENOMINATOR",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "builderarenaToken",
+		"outputs": [
+			{
+				"internalType": "contract IERC20",
+				"name": "",
+				"type": "address"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "bytes32",
+				"name": "matchId",
+				"type": "bytes32"
+			},
+			{
+				"internalType": "bytes32",
+				"name": "agentId",
+				"type": "bytes32"
+			}
+		],
+		"name": "getAgentPool",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "bytes32",
+				"name": "matchId",
+				"type": "bytes32"
+			},
+			{
+				"internalType": "bytes32",
+				"name": "agentId",
+				"type": "bytes32"
+			}
+		],
+		"name": "getAgentPoolBuilderarena",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "bytes32",
+				"name": "matchId",
+				"type": "bytes32"
+			},
+			{
+				"internalType": "address",
+				"name": "bettor",
+				"type": "address"
+			},
+			{
+				"internalType": "bytes32",
+				"name": "agentId",
+				"type": "bytes32"
+			}
+		],
+		"name": "getBet",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "bytes32",
+				"name": "matchId",
+				"type": "bytes32"
+			},
+			{
+				"internalType": "address",
+				"name": "bettor",
+				"type": "address"
+			},
+			{
+				"internalType": "bytes32",
+				"name": "agentId",
+				"type": "bytes32"
+			}
+		],
+		"name": "getBetBuilderarena",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "bytes32",
+				"name": "matchId",
+				"type": "bytes32"
+			}
+		],
+		"name": "getBettorCount",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "bytes32",
+				"name": "matchId",
+				"type": "bytes32"
+			},
+			{
+				"internalType": "address",
+				"name": "bettor",
+				"type": "address"
+			}
+		],
+		"name": "getClaimableAmounts",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "monAmount",
+				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "builderarenaAmount",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "bytes32",
+				"name": "matchId",
+				"type": "bytes32"
+			}
+		],
+		"name": "getMatchStatus",
+		"outputs": [
+			{
+				"internalType": "enum ClawBetting.MatchStatus",
+				"name": "status",
+				"type": "uint8"
+			},
+			{
+				"internalType": "uint256",
+				"name": "totalPoolMon",
+				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "totalPoolBuilderarena",
+				"type": "uint256"
+			},
+			{
+				"internalType": "bytes32[]",
+				"name": "agentIds",
+				"type": "bytes32[]"
+			},
+			{
+				"internalType": "bytes32[]",
+				"name": "winnerAgentIds",
+				"type": "bytes32[]"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "bytes32",
+				"name": "matchId",
+				"type": "bytes32"
+			},
+			{
+				"internalType": "address",
+				"name": "bettor",
+				"type": "address"
+			}
+		],
+		"name": "hasClaimed",
+		"outputs": [
+			{
+				"internalType": "bool",
+				"name": "",
+				"type": "bool"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "bytes32",
+				"name": "matchId",
+				"type": "bytes32"
+			},
+			{
+				"internalType": "address",
+				"name": "bettor",
+				"type": "address"
+			}
+		],
+		"name": "hasClaimedBuilderarena",
+		"outputs": [
+			{
+				"internalType": "bool",
+				"name": "",
+				"type": "bool"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "maxBetAmount",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "minBetAmount",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "operator",
+		"outputs": [
+			{
+				"internalType": "address",
+				"name": "",
+				"type": "address"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "owner",
+		"outputs": [
+			{
+				"internalType": "address",
+				"name": "",
+				"type": "address"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "treasury",
+		"outputs": [
+			{
+				"internalType": "address",
+				"name": "",
+				"type": "address"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "TREASURY_BPS",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "WINNER_AGENT_BPS",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "WINNER_BETTORS_BPS",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
 		"type": "function"
 	}
 ]

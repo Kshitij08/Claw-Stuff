@@ -413,9 +413,9 @@ export async function claimWinnings(
   matchId: string,
 ): Promise<{ success: boolean; txHashMon?: string; txHashMclaw?: string; payoutMon?: string; payoutMclaw?: string; error?: string }> {
   // Check claimable amounts from contract (MON and MCLAW)
-  const { monAmount, mclawAmount } = await chain.getClaimableAmounts(matchId, bettorAddress);
+  const { monAmount, builderarenaAmount } = await chain.getClaimableAmounts(matchId, bettorAddress);
   const hasMon = monAmount !== '0';
-  const hasMclaw = mclawAmount !== '0';
+  const hasMclaw = builderarenaAmount !== '0';
 
   if (!hasMon && !hasMclaw) {
     return { success: false, error: 'Nothing to claim' };
@@ -447,22 +447,22 @@ export async function claimWinnings(
     }
   }
 
-  // Claim MCLAW (via operator) if any
+  // Claim builderarena (via operator) if any
   if (hasMclaw) {
-    txHashMclaw = await chain.claimMclawFor(bettorAddress, matchId) || undefined;
+    txHashMclaw = await chain.claimBuilderarenaFor(bettorAddress, matchId) || undefined;
     if (txHashMclaw) {
       try {
         await dbQuery(
           `INSERT INTO bet_settlements (match_id, bettor_address, payout_amount, claim_tx_hash, token)
            VALUES ($1, $2, $3, $4, $5)`,
-          [matchId, bettorAddress.toLowerCase(), mclawAmount, txHashMclaw, 'MCLAW'],
+          [matchId, bettorAddress.toLowerCase(), builderarenaAmount, txHashMclaw, 'MCLAW'],
         );
         await dbQuery(
           `UPDATE betting_leaderboard SET
              total_wins = total_wins + 1,
              total_payout = total_payout + $2
            WHERE bettor_address = $1`,
-          [bettorAddress.toLowerCase(), mclawAmount],
+          [bettorAddress.toLowerCase(), builderarenaAmount],
         );
       } catch (err) {
         console.error('[betting/service] DB claimWinnings MCLAW failed:', err);
@@ -479,7 +479,7 @@ export async function claimWinnings(
     txHashMon,
     txHashMclaw,
     payoutMon: hasMon ? monAmount : undefined,
-    payoutMclaw: hasMclaw ? mclawAmount : undefined,
+    payoutMclaw: hasMclaw ? builderarenaAmount : undefined,
   };
 }
 
@@ -502,9 +502,9 @@ async function autoDistributeWinnings(matchId: string, winnerAgentNames: string[
   for (const row of winningBettors) {
     const addr = row.bettor_address;
     try {
-      const { monAmount, mclawAmount } = await chain.getClaimableAmounts(matchId, addr);
+      const { monAmount, builderarenaAmount } = await chain.getClaimableAmounts(matchId, addr);
       const hasMon = monAmount !== '0';
-      const hasMclaw = mclawAmount !== '0';
+      const hasMclaw = builderarenaAmount !== '0';
       if (!hasMon && !hasMclaw) {
         console.log(`[betting/service] ${addr} has nothing to claim for ${matchId}, skipping`);
         continue;
@@ -545,25 +545,25 @@ async function autoDistributeWinnings(matchId: string, winnerAgentNames: string[
         }
       }
 
-      // Claim MCLAW if any
+      // Claim builderarena if any
       if (hasMclaw) {
-        const txHashMclaw = await chain.claimMclawFor(addr, matchId);
+        const txHashMclaw = await chain.claimBuilderarenaFor(addr, matchId);
         if (!txHashMclaw) {
-          console.error(`[betting/service] claimMclawFor(${addr}, ${matchId}) MCLAW tx failed`);
+          console.error(`[betting/service] claimBuilderarenaFor(${addr}, ${matchId}) builderarena tx failed`);
         } else {
-          console.log(`[betting/service] Auto-claimed ${weiToMON(mclawAmount)} MCLAW for ${addr} (tx: ${txHashMclaw})`);
+          console.log(`[betting/service] Auto-claimed ${weiToMON(builderarenaAmount)} builderarena for ${addr} (tx: ${txHashMclaw})`);
           try {
             await dbQuery(
               `INSERT INTO bet_settlements (match_id, bettor_address, payout_amount, claim_tx_hash, token)
                VALUES ($1, $2, $3, $4, $5)`,
-              [matchId, addr, mclawAmount, txHashMclaw, 'MCLAW'],
+              [matchId, addr, builderarenaAmount, txHashMclaw, 'MCLAW'],
             );
             await dbQuery(
               `UPDATE betting_leaderboard SET
                  total_wins = total_wins + 1,
                  total_payout = total_payout + $2
                WHERE bettor_address = $1 AND token = 'MCLAW'`,
-              [addr, mclawAmount],
+              [addr, builderarenaAmount],
             );
           } catch (dbErr) {
             console.error(`[betting/service] DB settlement record failed for ${addr} (MCLAW):`, dbErr);
@@ -572,8 +572,8 @@ async function autoDistributeWinnings(matchId: string, winnerAgentNames: string[
           emit('winningsDistributed', {
             matchId,
             bettorAddress: addr,
-            payout: mclawAmount,
-            payoutMON: weiToMON(mclawAmount),
+            payout: builderarenaAmount,
+            payoutMON: weiToMON(builderarenaAmount),
             txHash: txHashMclaw,
             token: 'MCLAW',
           });

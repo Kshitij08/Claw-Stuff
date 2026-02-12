@@ -8,7 +8,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 /**
  * @title ClawBetting
  * @notice Pari-mutuel prediction market for Claw IO matches using native MON
- *         and ERC20 $MClawIO. Humans and agents always place and fund their
+ *         and ERC20 $builderarena. Humans and agents always place and fund their
  *         own bets (self-funded). After a match, the operator resolves and
  *         winners claim their proportional share of 90% of each token pool.
  *
@@ -19,7 +19,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  *
  * If nobody bet on the winning agent(s), the 90% bettor share goes to treasury.
  *
- * Deploy via Remix IDE on Monad testnet (chainId 10143).
+ * Deploy via Remix IDE on Base mainnet (chainId 8453).
  */
 contract ClawBetting is Ownable, ReentrancyGuard {
     // ── Constants ──────────────────────────────────────────────────────
@@ -34,8 +34,8 @@ contract ClawBetting is Ownable, ReentrancyGuard {
     uint256 public minBetAmount;
     uint256 public maxBetAmount; // 0 = no limit
 
-    // ERC-20 token used for the secondary pool ($MClawIO)
-    IERC20 public immutable mclawToken;
+    // ERC-20 token used for the secondary pool ($builderarena)
+    IERC20 public immutable builderarenaToken;
 
     enum MatchStatus { None, Open, Closed, Resolved, Cancelled }
 
@@ -56,12 +56,12 @@ contract ClawBetting is Ownable, ReentrancyGuard {
         MatchStatus status;
         bytes32[] agentIds;
         bytes32[] winnerAgentIds;
-        // One pool per token: native MON and ERC20 $MClawIO
+        // One pool per token: native MON and ERC20 $builderarena
         Pool monPool;
-        Pool mclawPool;
+        Pool builderarenaPool;
         // bettor → already claimed for each token
         mapping(address => bool) claimedMon;
-        mapping(address => bool) claimedMclaw;
+        mapping(address => bool) claimedBuilderarena;
     }
 
     mapping(bytes32 => MatchInfo) private matches;
@@ -95,7 +95,7 @@ contract ClawBetting is Ownable, ReentrancyGuard {
     );
 
     // Token-specific events
-    event MclawBetPlaced(
+    event BuilderarenaBetPlaced(
         bytes32 indexed matchId,
         address indexed bettor,
         bytes32 indexed agentId,
@@ -104,7 +104,7 @@ contract ClawBetting is Ownable, ReentrancyGuard {
 
     event MatchResolvedToken(
         bytes32 indexed matchId,
-        address indexed token, // address(0) = MON, mclawToken = $MClawIO
+        address indexed token, // address(0) = MON, builderarenaToken = $builderarena
         uint256 totalPool,
         uint256 treasuryPayout,
         uint256 agentPayout
@@ -122,16 +122,16 @@ contract ClawBetting is Ownable, ReentrancyGuard {
         address _operator,
         uint256 _minBetAmount,
         uint256 _maxBetAmount,
-        address _mclawToken
+        address _builderarenaToken
     ) Ownable(msg.sender) {
         require(_treasury != address(0), "ClawBetting: zero treasury");
         require(_operator != address(0), "ClawBetting: zero operator");
-        require(_mclawToken != address(0), "ClawBetting: zero mclaw token");
+        require(_builderarenaToken != address(0), "ClawBetting: zero builderarena token");
         treasury = _treasury;
         operator = _operator;
         minBetAmount = _minBetAmount;
         maxBetAmount = _maxBetAmount;
-        mclawToken = IERC20(_mclawToken);
+        builderarenaToken = IERC20(_builderarenaToken);
     }
 
     // ── Admin setters ──────────────────────────────────────────────────
@@ -206,10 +206,10 @@ contract ClawBetting is Ownable, ReentrancyGuard {
     }
 
     /**
-     * @notice Human or agent places a bet using ERC20 $MClawIO. Caller must
+     * @notice Human or agent places a bet using ERC20 $builderarena. Caller must
      *         have approved this contract for at least `amount`.
      */
-    function placeMclawBet(
+    function placeBuilderarenaBet(
         bytes32 matchId,
         bytes32 agentId,
         uint256 amount
@@ -219,12 +219,12 @@ contract ClawBetting is Ownable, ReentrancyGuard {
         require(amount > 0, "ClawBetting: zero amount");
 
         require(
-            mclawToken.transferFrom(msg.sender, address(this), amount),
-            "ClawBetting: MCLAW transfer failed"
+            builderarenaToken.transferFrom(msg.sender, address(this), amount),
+            "ClawBetting: builderarena transfer failed"
         );
 
-        _placeBetInPool(m, m.mclawPool, msg.sender, agentId, amount);
-        emit MclawBetPlaced(matchId, msg.sender, agentId, amount);
+        _placeBetInPool(m, m.builderarenaPool, msg.sender, agentId, amount);
+        emit BuilderarenaBetPlaced(matchId, msg.sender, agentId, amount);
     }
 
     /**
@@ -268,12 +268,12 @@ contract ClawBetting is Ownable, ReentrancyGuard {
             winnerAgentWallets
         );
 
-        // Resolve MClawIO pool
+        // Resolve builderarena pool
         _resolvePoolForToken(
             matchId,
             m,
-            m.mclawPool,
-            address(mclawToken),
+            m.builderarenaPool,
+            address(builderarenaToken),
             winnerAgentIds,
             winnerAgentWallets
         );
@@ -294,17 +294,17 @@ contract ClawBetting is Ownable, ReentrancyGuard {
     }
 
     /**
-     * @notice Winning bettor claims proportional share of the 90 % $MClawIO pool.
+     * @notice Winning bettor claims proportional share of the 90 % $builderarena pool.
      */
-    function claimMclaw(bytes32 matchId) external nonReentrant {
-        _claimMclaw(msg.sender, matchId);
+    function claimBuilderarena(bytes32 matchId) external nonReentrant {
+        _claimBuilderarena(msg.sender, matchId);
     }
 
     /**
-     * @notice Operator claims $MClawIO winnings on behalf of a bettor.
+     * @notice Operator claims $builderarena winnings on behalf of a bettor.
      */
-    function claimMclawFor(address bettor, bytes32 matchId) external onlyOperator nonReentrant {
-        _claimMclaw(bettor, matchId);
+    function claimBuilderarenaFor(address bettor, bytes32 matchId) external onlyOperator nonReentrant {
+        _claimBuilderarena(bettor, matchId);
     }
 
     /**
@@ -330,15 +330,15 @@ contract ClawBetting is Ownable, ReentrancyGuard {
             }
         }
 
-        // Refund MClaw bettors
-        for (uint256 i = 0; i < m.mclawPool.bettors.length; i++) {
-            address bettor = m.mclawPool.bettors[i];
-            uint256 total = m.mclawPool.totalBetByUser[bettor];
+        // Refund builderarena bettors
+        for (uint256 i = 0; i < m.builderarenaPool.bettors.length; i++) {
+            address bettor = m.builderarenaPool.bettors[i];
+            uint256 total = m.builderarenaPool.totalBetByUser[bettor];
             if (total > 0) {
-                m.mclawPool.totalBetByUser[bettor] = 0;
+                m.builderarenaPool.totalBetByUser[bettor] = 0;
                 require(
-                    mclawToken.transfer(bettor, total),
-                    "ClawBetting: MCLAW refund failed"
+                    builderarenaToken.transfer(bettor, total),
+                    "ClawBetting: builderarena refund failed"
                 );
             }
         }
@@ -351,12 +351,12 @@ contract ClawBetting is Ownable, ReentrancyGuard {
     function getMatchStatus(bytes32 matchId) external view returns (
         MatchStatus status,
         uint256 totalPoolMon,
-        uint256 totalPoolMclaw,
+        uint256 totalPoolBuilderarena,
         bytes32[] memory agentIds,
         bytes32[] memory winnerAgentIds
     ) {
         MatchInfo storage m = matches[matchId];
-        return (m.status, m.monPool.totalPool, m.mclawPool.totalPool, m.agentIds, m.winnerAgentIds);
+        return (m.status, m.monPool.totalPool, m.builderarenaPool.totalPool, m.agentIds, m.winnerAgentIds);
     }
 
     function getAgentPool(bytes32 matchId, bytes32 agentId) external view returns (uint256) {
@@ -364,9 +364,9 @@ contract ClawBetting is Ownable, ReentrancyGuard {
         return m.monPool.agentPools[agentId];
     }
 
-    function getAgentPoolMclaw(bytes32 matchId, bytes32 agentId) external view returns (uint256) {
+    function getAgentPoolBuilderarena(bytes32 matchId, bytes32 agentId) external view returns (uint256) {
         MatchInfo storage m = matches[matchId];
-        return m.mclawPool.agentPools[agentId];
+        return m.builderarenaPool.agentPools[agentId];
     }
 
     function getBet(
@@ -378,13 +378,13 @@ contract ClawBetting is Ownable, ReentrancyGuard {
         return m.monPool.bets[bettor][agentId];
     }
 
-    function getBetMclaw(
+    function getBetBuilderarena(
         bytes32 matchId,
         address bettor,
         bytes32 agentId
     ) external view returns (uint256) {
         MatchInfo storage m = matches[matchId];
-        return m.mclawPool.bets[bettor][agentId];
+        return m.builderarenaPool.bets[bettor][agentId];
     }
 
     function hasClaimed(bytes32 matchId, address bettor) external view returns (bool) {
@@ -392,15 +392,15 @@ contract ClawBetting is Ownable, ReentrancyGuard {
         return m.claimedMon[bettor];
     }
 
-    function hasClaimedMclaw(bytes32 matchId, address bettor) external view returns (bool) {
+    function hasClaimedBuilderarena(bytes32 matchId, address bettor) external view returns (bool) {
         MatchInfo storage m = matches[matchId];
-        return m.claimedMclaw[bettor];
+        return m.claimedBuilderarena[bettor];
     }
 
     function getClaimableAmounts(
         bytes32 matchId,
         address bettor
-    ) external view returns (uint256 monAmount, uint256 mclawAmount) {
+    ) external view returns (uint256 monAmount, uint256 builderarenaAmount) {
         MatchInfo storage m = matches[matchId];
         if (m.status != MatchStatus.Resolved) {
             return (0, 0);
@@ -415,12 +415,12 @@ contract ClawBetting is Ownable, ReentrancyGuard {
             }
         }
 
-        if (!m.claimedMclaw[bettor]) {
-            (uint256 combinedWinnerPoolMclaw, uint256 userWinningBetsMclaw) =
-                _winningBetsInPool(m, m.mclawPool, bettor);
-            if (combinedWinnerPoolMclaw > 0 && userWinningBetsMclaw > 0) {
-                uint256 payoutPoolMclaw = (m.mclawPool.totalPool * WINNER_BETTORS_BPS) / BPS_DENOMINATOR;
-                mclawAmount = (userWinningBetsMclaw * payoutPoolMclaw) / combinedWinnerPoolMclaw;
+        if (!m.claimedBuilderarena[bettor]) {
+            (uint256 combinedWinnerPoolBuilderarena, uint256 userWinningBetsBuilderarena) =
+                _winningBetsInPool(m, m.builderarenaPool, bettor);
+            if (combinedWinnerPoolBuilderarena > 0 && userWinningBetsBuilderarena > 0) {
+                uint256 payoutPoolBuilderarena = (m.builderarenaPool.totalPool * WINNER_BETTORS_BPS) / BPS_DENOMINATOR;
+                builderarenaAmount = (userWinningBetsBuilderarena * payoutPoolBuilderarena) / combinedWinnerPoolBuilderarena;
             }
         }
     }
@@ -558,23 +558,23 @@ contract ClawBetting is Ownable, ReentrancyGuard {
         emit WinningsClaimed(matchId, bettor, payout);
     }
 
-    function _claimMclaw(address bettor, bytes32 matchId) internal {
+    function _claimBuilderarena(address bettor, bytes32 matchId) internal {
         MatchInfo storage m = matches[matchId];
         require(m.status == MatchStatus.Resolved, "ClawBetting: not resolved");
-        require(!m.claimedMclaw[bettor], "ClawBetting: already claimed MCLAW");
+        require(!m.claimedBuilderarena[bettor], "ClawBetting: already claimed builderarena");
 
         (uint256 combinedWinnerPool, uint256 userWinningBets) =
-            _winningBetsInPool(m, m.mclawPool, bettor);
+            _winningBetsInPool(m, m.builderarenaPool, bettor);
         require(userWinningBets > 0, "ClawBetting: no winning bets");
 
-        m.claimedMclaw[bettor] = true;
+        m.claimedBuilderarena[bettor] = true;
 
-        uint256 payoutPool = (m.mclawPool.totalPool * WINNER_BETTORS_BPS) / BPS_DENOMINATOR;
+        uint256 payoutPool = (m.builderarenaPool.totalPool * WINNER_BETTORS_BPS) / BPS_DENOMINATOR;
         uint256 payout = (userWinningBets * payoutPool) / combinedWinnerPool;
 
         require(
-            mclawToken.transfer(bettor, payout),
-            "ClawBetting: MCLAW payout transfer failed"
+            builderarenaToken.transfer(bettor, payout),
+            "ClawBetting: builderarena payout transfer failed"
         );
     }
 

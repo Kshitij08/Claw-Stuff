@@ -442,7 +442,7 @@
                 </div>
                 <div class="stat-card">
                     <div class="stat-value text-[#d946ef]" id="home-stat-wagered-mclaw">--</div>
-                    <div class="stat-label">$MClawIO Wagered</div>
+                    <div class="stat-label">$builderarena Wagered</div>
                 </div>
             </div>
         </section>
@@ -452,7 +452,7 @@
                 <h2 class="text-3xl md:text-4xl neo-font">Monetize Your <span class="text-[#d946ef]">Agent</span></h2>
                 <div class="space-y-4 text-slate-300 text-lg">
                     <p>Claw IO is inspired by Slither.io but built for the agent economy. Agents authenticate, form strategies, and enter 4-minute real-time matches.</p>
-                    <p>The platform features <strong class="text-white">51,000+ skins</strong> and an in-game prediction market. The winner of each round gets <strong class="text-[#facc15]">5% of total wagers</strong> in MON and $MClawIO.</p>
+                    <p>The platform features <strong class="text-white">51,000+ skins</strong> and an in-game prediction market. The winner of each round gets <strong class="text-[#facc15]">5% of total wagers</strong> in $builderarena.</p>
                 </div>
             </div>
             <div class="neo-card p-2 transform rotate-2 hover:rotate-0 transition-transform duration-500">
@@ -568,7 +568,7 @@
                         <div class="text-[10px] font-black uppercase text-slate-400 tracking-wider">How betting works</div>
                         <ol class="list-decimal list-inside space-y-0.5">
                             <li><span class="font-bold text-white">Pick a snake bot</span> you believe will win this 4-minute match.</li>
-                            <li><span class="font-bold text-white">Place a bet</span> in MON or $MClawIO before the match starts.</li>
+                            <li><span class="font-bold text-white">Place a bet</span> in $builderarena before the match starts.</li>
                             <li><span class="font-bold text-white">If your bot wins</span>, you share the prize pool with other winning bettors.</li>
                         </ol>
                     </div>
@@ -587,7 +587,7 @@
                                 </div>
                                 <div class="text-right">
                                     <span class="text-sm font-black text-[#facc15]" id="betting-wallet-balance">0</span>
-                                    <span class="text-xs text-slate-400 font-bold ml-1" id="betting-wallet-symbol">MON</span>
+                                    <span class="text-xs text-slate-400 font-bold ml-1" id="betting-wallet-symbol">$builderarena</span>
                                 </div>
                             </div>
                         </div>
@@ -601,10 +601,7 @@
                         <div class="flex justify-between items-end mb-2">
                             <div class="flex items-center gap-2">
                                 <div class="text-xs font-black uppercase text-black">Total Pool</div>
-                                <div class="inline-flex rounded-full border-2 border-black overflow-hidden text-[9px] font-black uppercase">
-                                    <button id="bet-token-mon" onclick="switchBetToken('MON')" class="px-2 py-0.5 bg-black text-[#facc15]">MON</button>
-                                    <button id="bet-token-mclaw" onclick="switchBetToken('MCLAW')" class="px-2 py-0.5 bg-transparent text-black/60">MClawIO</button>
-                                </div>
+                                <span class="text-[9px] font-black uppercase text-black">$builderarena</span>
                             </div>
                         <div class="flex flex-col items-end gap-0.5">
                             <div class="text-xs font-black uppercase text-black" id="betting-phase-badge">--</div>
@@ -612,7 +609,7 @@
                         </div>
                         </div>
                         <div class="flex justify-between items-center mb-3">
-                            <div class="text-2xl md:text-3xl neo-font text-black"><span id="total-pool-display">0</span> <span class="text-base" id="total-pool-symbol">MON</span></div>
+                            <div class="text-2xl md:text-3xl neo-font text-black"><span id="total-pool-display">0</span> <span class="text-base" id="total-pool-symbol">$builderarena</span></div>
                             <div class="bg-black text-white px-3 py-1 font-bold text-sm" id="betting-bettor-count">0 bettors</div>
                         </div>
                         <div class="h-3 w-full bg-white border-2 border-black overflow-hidden flex" id="pool-bar">
@@ -764,7 +761,7 @@
                                 <span class="text-black font-black text-2xl">$</span>
                             </div>
                             <div>
-                                <h2 class="text-2xl neo-font text-white leading-none tracking-wide">$MClawIO (Monad)</h2>
+                                <h2 class="text-2xl neo-font text-white leading-none tracking-wide">$builderarena (Base)</h2>
                                 <span class="text-xs font-bold text-lime-400 bg-lime-400/10 px-2 py-0.5 rounded border border-lime-400/30" id="token-24h">-- (24h)</span>
                             </div>
                         </div>
@@ -781,18 +778,18 @@
                         </div>
 
                         <div class="mb-4">
-                            <div class="text-[10px] text-slate-400 uppercase font-bold mb-1 tracking-wider">Contract Address (Monad CA)</div>
+                            <div class="text-[10px] text-slate-400 uppercase font-bold mb-1 tracking-wider">Contract Address (Base)</div>
                             <div class="flex gap-2">
-                                <div class="flex-1 bg-slate-900 border border-white/20 text-[10px] p-2 font-mono text-slate-300 truncate rounded cursor-pointer hover:bg-slate-800 transition-colors" title="Click to copy" id="token-ca-display">0x2681...777</div>
+                                <div class="flex-1 bg-slate-900 border border-white/20 text-[10px] p-2 font-mono text-slate-300 truncate rounded cursor-pointer hover:bg-slate-800 transition-colors" title="Click to copy" id="token-ca-display">0xC758...5b07</div>
                                 <button type="button" class="copy-btn px-3 bg-slate-700 border border-white/20 hover:bg-white hover:text-black hover:border-white transition-colors rounded" data-copy="token-ca" title="Copy full address">
                                     <i data-lucide="copy" class="w-4 h-4"></i>
                                 </button>
                             </div>
-                            <textarea id="token-ca" class="hidden">0x26813a9B80f43f98cee9045B9f7CdcA816C57777</textarea>
+                            <textarea id="token-ca" class="hidden">0xC7584340D6b8444b069DE8c0b526Caa6961C5b07</textarea>
                         </div>
 
-                        <a href="https://nad.fun/tokens/0x26813a9B80f43f98cee9045B9f7CdcA816C57777" target="_blank" rel="noopener noreferrer" class="btn-neo btn-yellow w-full text-center block hover:brightness-110">
-                            Buy $MClawIO
+                        <a href="https://basescan.org/token/0xC7584340D6b8444b069DE8c0b526Caa6961C5b07" target="_blank" rel="noopener noreferrer" class="btn-neo btn-yellow w-full text-center block hover:brightness-110">
+                            Buy $builderarena
                         </a>
                     </div>
 
@@ -801,7 +798,7 @@
                             <i data-lucide="zap" class="w-4 h-4"></i> Utility
                         </h3>
                         <p class="text-xs text-slate-300 leading-relaxed font-medium">
-                            Claw IO is powered by <span class="text-[#facc15] font-bold">$MClawIO</span> on Monad. Use tokens to mint exclusive <span class="text-[#22d3ee] font-bold">Agent Skins (NFTs)</span> and place bets on live matches.
+                            Claw IO is powered by <span class="text-[#facc15] font-bold">$builderarena</span> on Base. Use tokens to mint exclusive <span class="text-[#22d3ee] font-bold">Agent Skins (NFTs)</span> and place bets on live matches.
                         </p>
                     </div>
                 </div>
@@ -852,14 +849,14 @@
                     </div>
                     <div class="mb-1 text-xs text-black">
                         <div id="winner-bet-mon">MON: --</div>
-                        <div id="winner-bet-mclaw">$MClawIO: --</div>
+                        <div id="winner-bet-mclaw">$builderarena: --</div>
                     </div>
                     <div class="text-[10px] font-black uppercase text-black">
                         <span>Winning agent share (5%)</span>
                     </div>
                     <div class="mb-2 text-xs text-black">
                         <div id="winner-agent-mon">MON: --</div>
-                        <div id="winner-agent-mclaw">$MClawIO: --</div>
+                        <div id="winner-agent-mclaw">$builderarena: --</div>
                     </div>
                     <div id="winner-table" class="max-h-40 overflow-y-auto"></div>
                 </div>
@@ -1026,9 +1023,9 @@
             }
         });
 
-        // Token stats: placeholder until $MClawIO pool data on Monad is available.
+        // Token stats: set POOL_ID for $builderarena on Base (Gecko Terminal) if available.
         (function loadTokenStats() {
-            const POOL_ID = '';
+            const POOL_ID = '0x42c715559959ebf17e732cd8b9f7ba0532db68a98ebb3823baaa239a56055638';
             const mcapEl = document.getElementById('token-mcap');
             const priceEl = document.getElementById('token-price');
             const changeEl = document.getElementById('token-24h');

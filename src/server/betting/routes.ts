@@ -244,6 +244,18 @@ export function createBettingRoutes(): Router {
     }
   });
 
+  // ── GET /api/betting/global-stats ─────────────────────────────────────
+  // No auth. Total wagered across all matches, per token (for home page).
+  router.get('/global-stats', async (_req: Request, res: Response) => {
+    try {
+      const stats = await bettingService.getGlobalWagerTotals();
+      res.json(stats);
+    } catch (err) {
+      console.error('[betting/routes] /global-stats failed:', err);
+      res.status(500).json({ success: false, error: 'INTERNAL_ERROR' });
+    }
+  });
+
   // ── GET /api/betting/leaderboard ─────────────────────────────────────
   // No auth. Top bettors by volume.
   router.get('/leaderboard', async (req: Request, res: Response) => {

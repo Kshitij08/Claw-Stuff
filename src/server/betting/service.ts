@@ -815,6 +815,27 @@ export async function getMatchHistory(matchId: string) {
 }
 
 /**
+ * Get global wager totals across all matches, per token (for home page stats).
+ */
+export async function getGlobalWagerTotals(): Promise<{ totalWageredMON: string; totalWageredMClaw: string; totalWageredMONFormatted: string; totalWageredMClawFormatted: string }> {
+  const rows = await dbQuery<{ token: string; total: string }>(
+    `SELECT token, COALESCE(SUM(amount), 0)::text AS total FROM bets GROUP BY token`,
+  );
+  let monWei = '0';
+  let mclawWei = '0';
+  for (const r of rows) {
+    if (r.token === 'MCLAW') mclawWei = r.total;
+    else monWei = r.total;
+  }
+  return {
+    totalWageredMON: monWei,
+    totalWageredMClaw: mclawWei,
+    totalWageredMONFormatted: weiToMON(monWei),
+    totalWageredMClawFormatted: weiToMON(mclawWei),
+  };
+}
+
+/**
  * Get betting leaderboard ranked by total volume.
  */
 export async function getLeaderboard(limit: number = 50, token?: Token): Promise<LeaderboardEntry[]> {

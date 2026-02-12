@@ -161,6 +161,7 @@ async function loadContractInfo() {
 
 function updateWalletUI() {
   const btn = document.getElementById('wallet-connect-btn');
+  const homeBtn = document.getElementById('home-wallet-connect-btn');
   const disconnected = document.getElementById('betting-wallet-disconnected');
   const connected = document.getElementById('betting-wallet-connected');
   const addrEl = document.getElementById('betting-wallet-addr');
@@ -168,7 +169,9 @@ function updateWalletUI() {
   const symEl = document.getElementById('betting-wallet-symbol');
 
   if (walletAddress) {
-    if (btn) btn.textContent = shortenAddr(walletAddress);
+    const addrShort = shortenAddr(walletAddress);
+    if (btn) btn.textContent = addrShort;
+    if (homeBtn) homeBtn.textContent = addrShort;
     if (disconnected) disconnected.classList.add('hidden');
     if (connected) connected.classList.remove('hidden');
     if (addrEl) addrEl.textContent = shortenAddr(walletAddress);
@@ -223,7 +226,9 @@ window.addEventListener('reown-wallet-disconnected', function () {
   provider = null;
   bettingContract = null;
   const btn = document.getElementById('wallet-connect-btn');
+  const homeBtn = document.getElementById('home-wallet-connect-btn');
   if (btn) btn.textContent = 'Connect Wallet';
+  if (homeBtn) homeBtn.textContent = 'Connect Wallet';
   const disconnected = document.getElementById('betting-wallet-disconnected');
   const connected = document.getElementById('betting-wallet-connected');
   if (disconnected) disconnected.classList.remove('hidden');
@@ -239,7 +244,9 @@ if (window.ethereum) {
       signer = null;
       bettingContract = null;
       const btn = document.getElementById('wallet-connect-btn');
+      const homeBtn = document.getElementById('home-wallet-connect-btn');
       if (btn) btn.textContent = 'Connect Wallet';
+      if (homeBtn) homeBtn.textContent = 'Connect Wallet';
       const disconnected = document.getElementById('betting-wallet-disconnected');
       const connected = document.getElementById('betting-wallet-connected');
       if (disconnected) disconnected.classList.remove('hidden');

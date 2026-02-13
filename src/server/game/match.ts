@@ -20,6 +20,7 @@ export class MatchManager {
   private players: Map<string, Player> = new Map();
   private matchHistory: MatchResult[] = [];
   private allTimeStats: Map<string, { wins: number; totalScore: number }> = new Map();
+  private static readonly MAX_ALLTIME_STATS = 500; // cap in-memory leaderboard size
   private nextMatchId: number = 1;
   private scheduleTimer: NodeJS.Timeout | null = null;
   private lobbyStartTimeout: NodeJS.Timeout | null = null;
@@ -268,6 +269,13 @@ export class MatchManager {
         stats.totalScore += snake.score;
         this.allTimeStats.set(snake.name, stats);
       }
+    }
+
+    // Evict lowest-scoring entries if map exceeds cap (prevents unbounded memory growth)
+    if (this.allTimeStats.size > MatchManager.MAX_ALLTIME_STATS) {
+      const entries = Array.from(this.allTimeStats.entries())
+        .sort((a, b) => b[1].wins - a[1].wins || b[1].totalScore - a[1].totalScore);
+      this.allTimeStats = new Map(entries.slice(0, MatchManager.MAX_ALLTIME_STATS));
     }
 
     // Record match result

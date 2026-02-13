@@ -21,12 +21,22 @@ const DEV_MODE = process.env.NODE_ENV !== 'production';
 const app = express();
 const httpServer = createServer(app);
 
-// Initialize Socket.IO for spectators
+// Initialize Socket.IO for spectators – with memory-safe defaults
 const io = new SocketIOServer(httpServer, {
   cors: {
     origin: DEV_MODE ? '*' : undefined,
     methods: ['GET', 'POST'],
   },
+  // ── Memory-safety settings ────────────────────────────────────────
+  maxHttpBufferSize: 1e6,            // 1 MB max incoming message
+  pingTimeout: 10_000,               // disconnect unresponsive clients faster
+  pingInterval: 15_000,              // check liveness more often
+  connectTimeout: 10_000,            // refuse slow handshakes
+  perMessageDeflate: false,          // disable compression (CPU cost, can buffer)
+  httpCompression: false,
+  // Cap per-client write buffer: if a client falls behind, disconnect it
+  // instead of buffering GBs of stale game state.
+  connectionStateRecovery: { maxDisconnectionDuration: 30_000 },
 });
 
 // Middleware
@@ -54,9 +64,17 @@ setEmitter((event: string, data: any) => {
   io.emit(event, data);
 });
 
+// ── Socket.IO memory protection ─────────────────────────────────────
+const MAX_CONNECTIONS = 200;
+
 // WebSocket connection for spectators
 io.on('connection', (socket) => {
-  console.log(`Spectator connected: ${socket.id}`);
+  // Enforce max connections to prevent unbounded memory growth
+  const connectedCount = io.engine?.clientsCount ?? io.sockets.sockets.size;
+  if (connectedCount > MAX_CONNECTIONS) {
+    socket.disconnect(true);
+    return;
+  }
 
   // Send current state immediately
   const state = matchManager.getSpectatorState();
@@ -66,6 +84,24 @@ io.on('connection', (socket) => {
 
   // Send server status
   socket.emit('status', matchManager.getStatus());
+
+  // Detect slow clients: if write buffer exceeds threshold, disconnect them.
+  // This prevents a single slow client from accumulating GBs of buffered game state.
+  const transport = (socket.conn as any);
+  if (transport) {
+    const origWrite = transport.send;
+    if (typeof origWrite === 'function') {
+      transport.send = function (...args: any[]) {
+        if (transport.writeBuffer && transport.writeBuffer.length > 50) {
+          // > 50 queued packets = client is severely behind; disconnect
+          console.warn(`[ws] Disconnecting slow client ${socket.id} (${transport.writeBuffer.length} buffered packets)`);
+          socket.disconnect(true);
+          return;
+        }
+        return origWrite.apply(transport, args);
+      };
+    }
+  }
 
   // Handle human bet notification (frontend sends this after successful on-chain tx)
   socket.on('humanBetPlaced', async (data: {
@@ -94,13 +130,19 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
-    console.log(`Spectator disconnected: ${socket.id}`);
+    // no-op (removed verbose logging to reduce log volume)
   });
 });
 
 // Set up match manager callbacks
+// Throttle gameState broadcasts to ~10 Hz (every other tick) to halve memory/egress.
+// Use volatile.emit so Socket.IO drops frames for slow clients instead of buffering.
+let tickCounter = 0;
 matchManager.onStateUpdate((state) => {
-  io.emit('gameState', state);
+  tickCounter++;
+  if (tickCounter % 2 === 0) {
+    io.volatile.emit('gameState', state);
+  }
 });
 
 matchManager.onMatchEndEvent((result) => {

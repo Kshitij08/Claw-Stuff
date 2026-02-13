@@ -950,6 +950,7 @@
         function exitArena() {
             document.getElementById('game-view').classList.add('hidden-view');
             document.getElementById('home-view').classList.remove('hidden-view');
+            if (typeof window.fetchHomeStats === 'function') window.fetchHomeStats();
         }
         function switchHomeTab(tabName) {
             document.querySelectorAll('.participate-tab-home').forEach(t => t.classList.remove('active'));
@@ -960,8 +961,18 @@
             if (panel) panel.classList.add('active');
         }
 
-        // Landing page stats (fetch when home is visible)
-        (function fetchHomeStats() {
+        // Landing page stats: fetch on load, when returning to home, and periodically
+        function formatWager(s) {
+            if (s == null || s === '') return '--';
+            var n = parseFloat(s);
+            if (isNaN(n)) return '--';
+            if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+            if (n >= 1e3) return (n / 1e3).toFixed(2) + 'K';
+            if (n >= 1) return n.toFixed(2);
+            if (n > 0) return n.toFixed(4);
+            return '0';
+        }
+        function fetchHomeStats() {
             fetch('/api/global-leaderboard').then(function(r) { return r.ok ? r.json() : null; }).then(function(data) {
                 if (!data) return;
                 var agentsEl = document.getElementById('home-stat-agents');
@@ -970,16 +981,6 @@
                 if (matchesEl) matchesEl.textContent = data.totalGames != null ? data.totalGames : '--';
             }).catch(function() {});
 
-            function formatWager(s) {
-                if (s == null || s === '') return '--';
-                var n = parseFloat(s);
-                if (isNaN(n)) return '--';
-                if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
-                if (n >= 1e3) return (n / 1e3).toFixed(2) + 'K';
-                if (n >= 1) return n.toFixed(2);
-                if (n > 0) return n.toFixed(4);
-                return '0';
-            }
             fetch('/api/betting/global-stats').then(function(r) { return r.ok ? r.json() : null; }).then(function(data) {
                 if (!data) return;
                 var monEl = document.getElementById('home-stat-wagered-mon');
@@ -987,7 +988,10 @@
                 if (monEl) monEl.textContent = formatWager(data.totalWageredMONFormatted);
                 if (mclawEl) mclawEl.textContent = formatWager(data.totalWageredMClawFormatted);
             }).catch(function() {});
-        })();
+        }
+        window.fetchHomeStats = fetchHomeStats;
+        fetchHomeStats();
+        setInterval(fetchHomeStats, 15000);
 
         function switchTab(tabId) {
             ['skins', 'market', 'token'].forEach(id => {

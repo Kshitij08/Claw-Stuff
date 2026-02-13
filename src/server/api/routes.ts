@@ -313,6 +313,7 @@ export function createRoutes(matchManager: MatchManager): Router {
 
   // GET /api/skins/preview - No auth, generate snake PNG from body/eyes/mouth IDs
   const previewCache = new Map<string, Buffer>();
+  const PREVIEW_CACHE_MAX = 300; // cap memory; evict oldest when over
   router.get('/skins/preview', async (req: Request, res: Response) => {
     const bodyId = typeof req.query.bodyId === 'string' ? req.query.bodyId : '';
     const eyesId = typeof req.query.eyesId === 'string' ? req.query.eyesId : '';
@@ -343,6 +344,10 @@ export function createRoutes(matchManager: MatchManager): Router {
         const { bodyPath, eyesPath, mouthPath } = getSkinPartPaths(bodyId, eyesId, mouthId);
         const result = await generateSnake(bodyPath, eyesPath, mouthPath);
         buffer = result.buffer;
+        if (previewCache.size >= PREVIEW_CACHE_MAX) {
+          const firstKey = previewCache.keys().next().value;
+          if (firstKey != null) previewCache.delete(firstKey);
+        }
         previewCache.set(cacheKey, buffer);
       }
       res.setHeader('Content-Type', 'image/png');

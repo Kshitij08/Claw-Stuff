@@ -6,6 +6,7 @@ import {
   TICK_INTERVAL,
   DROPPED_FOOD_VALUE,
   NORMAL_SPEED,
+  MAX_FOOD_COUNT,
 } from '../../shared/constants.js';
 import {
   createSnake,
@@ -84,11 +85,9 @@ export class GameEngine {
     this.match.endTime = this.match.startTime + durationMs;
     this.match.food = spawnInitialFood();
 
-    // Log initial snake positions
-    for (const [id, snake] of this.match.snakes) {
-      const head = snake.segments[0];
-      console.log(`[START] Snake ${snake.name}: pos=(${head.x.toFixed(1)}, ${head.y.toFixed(1)}), angle=${snake.angle.toFixed(1)}, segments=${snake.segments.length}`);
-    }
+    // Log match start summary (single line to reduce log volume)
+    const names = Array.from(this.match.snakes.values()).map(s => s.name).join(', ');
+    console.log(`[START] Match ${this.match.id} with ${this.match.snakes.size} snakes: ${names}`);
 
     // Start game loop
     this.tickTimer = setInterval(() => this.tick(), TICK_INTERVAL);
@@ -145,8 +144,6 @@ export class GameEngine {
       // Check collision with other snakes' bodies
       const collision = findCollisionTarget(head, this.match.snakes, playerId);
       if (collision) {
-        const hitSnake = this.match.snakes.get(collision.snakeId);
-        console.log(`[DEATH] Snake ${snake.name} hit ${collision.snakeId === playerId ? 'SELF' : hitSnake?.name} at tick ${this.match.tick}. Head: (${head.x.toFixed(1)}, ${head.y.toFixed(1)}), segment ${collision.segmentIndex}`);
         killSnake(snake, collision.snakeId, this.match.tick);
         this.dropSnakeAsFood(snake);
         continue;
@@ -195,6 +192,16 @@ export class GameEngine {
         }
       }
     }
+
+    // Trim excess food: snake deaths can push food count well above MAX_FOOD_COUNT.
+    // Cap at 2× to avoid unbounded growth (and the large JSON payloads it causes).
+    const MAX_FOOD_HARD_CAP = MAX_FOOD_COUNT * 2;
+    if (this.match.food.length > MAX_FOOD_HARD_CAP) {
+      this.match.food.length = MAX_FOOD_HARD_CAP;
+    }
+
+    // Maintain minimum food count (respawn eaten food)
+    this.match.food = maintainFoodCount(this.match.food);
 
     // Check if all snakes are dead - end match early
     const stillAlive = Array.from(this.match.snakes.values()).filter(s => s.alive);

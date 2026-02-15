@@ -25,6 +25,7 @@ export function SpectatorCamera() {
   const followInitializedRef = useRef(false);
   const leftMouseDownRef = useRef(false);
   const userHasRotatedRef = useRef(false);
+  const prevSelectedBotIdRef = useRef(null);
 
   const applyCameraOverMap = () => {
     if (!controlsRef.current) return;
@@ -96,6 +97,11 @@ export function SpectatorCamera() {
     if (!controls) return;
 
     if (selectedBotId) {
+      if (prevSelectedBotIdRef.current !== selectedBotId) {
+        followInitializedRef.current = false;
+        userHasRotatedRef.current = false;
+        prevSelectedBotIdRef.current = selectedBotId;
+      }
       const bot = players.find((p) => p.id === selectedBotId);
       const pos = bot?.state?.pos ?? bot?.state?.getState?.("pos");
       if (pos) {
@@ -127,6 +133,7 @@ export function SpectatorCamera() {
     }
     followInitializedRef.current = false;
     userHasRotatedRef.current = false;
+    prevSelectedBotIdRef.current = null;
 
     const target = controls.target;
     const cam = camera;

@@ -560,7 +560,8 @@ export const BotController = ({
               weaponType: weapon,
             });
           }
-          state.setState("ammo", Math.max(0, ammo - 1));
+          ammo = Math.max(0, ammo - 1);
+          state.setState("ammo", ammo);
         }
       }
 

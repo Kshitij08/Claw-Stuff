@@ -31,6 +31,9 @@ const DEFAULT_CHARACTER = "G_1";
 /** Bot skins: G_1.glb through G_10.glb */
 const BOT_CHARACTERS = Array.from({ length: 10 }, (_, i) => `G_${i + 1}`);
 
+const BG_MUSIC_URL = "/claw-shooter/sounds/bg music.mp3";
+const KNIFE_STAB_URL = "/claw-shooter/sounds/knife stab.mp3";
+
 export const Experience = ({ downgradedPerformance = false }) => {
   const [players, setPlayers] = useState([]);
   const [bullets, setBullets] = useState([]);
@@ -48,6 +51,8 @@ export const Experience = ({ downgradedPerformance = false }) => {
   const hasStartedRef = useRef(false);
   const botsAddedRef = useRef(0);
   const pickupsSpawnedRef = useRef(false);
+  const bgMusicRef = useRef(null);
+  const knifeStabRef = useRef(null);
   const { weaponPickups, takePickup, addWeaponPickup, spawnWeaponPickups, checkWinCondition, gamePhase, getOccupiedBotPositionsRef } =
     useGameManager();
   const scene = useThree((s) => s.scene);
@@ -65,6 +70,31 @@ export const Experience = ({ downgradedPerformance = false }) => {
     getOccupiedBotPositionsRef.current = () => botPositionsRef.current;
     return () => { getOccupiedBotPositionsRef.current = null; };
   }, [getOccupiedBotPositionsRef]);
+
+  /* Background music on loop */
+  useEffect(() => {
+    const audio = new Audio(BG_MUSIC_URL);
+    audio.loop = true;
+    audio.volume = 0.5;
+    bgMusicRef.current = audio;
+    const play = () => {
+      audio.play().catch(() => {});
+    };
+    play();
+    return () => {
+      audio.pause();
+      bgMusicRef.current = null;
+    };
+  }, []);
+
+  /* Preload knife stab sound */
+  useEffect(() => {
+    knifeStabRef.current = new Audio(KNIFE_STAB_URL);
+    knifeStabRef.current.volume = 1;
+    return () => {
+      knifeStabRef.current = null;
+    };
+  }, []);
 
   /* Spawn weapon pickups once when gamePhase transitions to "playing" (at gun spawn points) */
   useEffect(() => {
@@ -99,6 +129,10 @@ export const Experience = ({ downgradedPerformance = false }) => {
   };
 
   const onMeleeHit = (victimId, attackerId, damage) => {
+    if (knifeStabRef.current) {
+      knifeStabRef.current.currentTime = 0;
+      knifeStabRef.current.play().catch(() => {});
+    }
     const victim = players.find((p) => p.state?.id === victimId);
     if (!victim?.state || !isHost()) return;
     const currentHealth = victim.state.state?.health ?? 100;

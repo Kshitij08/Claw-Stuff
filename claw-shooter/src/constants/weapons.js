@@ -112,6 +112,9 @@ export const MIN_DISTANCE_GUN_FROM_PLAYER_SPAWN = 6;
 /** Min distance (m) between any two player spawns so they never spawn on top of each other */
 export const MIN_SPAWN_SEPARATION = 4;
 
+/** Min distance (m) between any two gun pickups so they never spawn at the same spot */
+export const MIN_DISTANCE_GUN_FROM_GUN = 3;
+
 /** Human-readable weapon names for UI */
 export const WEAPON_LABELS = {
   [WEAPON_TYPES.KNIFE]: "Knife",

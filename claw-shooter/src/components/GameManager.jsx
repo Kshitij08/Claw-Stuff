@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect } from "react";
 import { Vector3 } from "three";
-import { GUN_TYPES, PLAYER_COUNT, MAP_BOUNDS, MIN_DISTANCE_GUN_FROM_PLAYER_SPAWN } from "../constants/weapons";
+import { GUN_TYPES, PLAYER_COUNT, MAP_BOUNDS, MIN_DISTANCE_GUN_FROM_PLAYER_SPAWN, MIN_DISTANCE_GUN_FROM_GUN } from "../constants/weapons";
 
 const GameManagerContext = createContext(null);
 
@@ -13,6 +13,11 @@ export function GameManagerProvider({ children }) {
   const spawnPositionsRef = useRef([]);
   /** Set by Experience: () => array of {x,y,z} currently occupied by bots (alive, not dead) */
   const getOccupiedBotPositionsRef = useRef(null);
+  /** Ref to current weapon pickups so addWeaponPickup can avoid spawning on top of them */
+  const weaponPickupsRef = useRef([]);
+  useEffect(() => {
+    weaponPickupsRef.current = weaponPickups;
+  }, [weaponPickups]);
 
   const startMatch = useCallback(() => {
     if (gamePhase !== "lobby") return;
@@ -40,7 +45,19 @@ export function GameManagerProvider({ children }) {
 
   /** Spawn a single weapon pickup at a random position (e.g. dropped on bot death). */
   const addWeaponPickup = useCallback((weaponType) => {
-    const positions = spawnPositionsRef.current;
+    const minDistFromGun = MIN_DISTANCE_GUN_FROM_GUN;
+    const existing = weaponPickupsRef.current.filter((p) => !p.taken);
+    const dist = (a, b) => {
+      const ax = a?.x ?? 0, az = a?.z ?? 0;
+      const bx = b?.x ?? 0, bz = b?.z ?? 0;
+      return Math.sqrt((ax - bx) ** 2 + (az - bz) ** 2);
+    };
+    let positions = spawnPositionsRef.current;
+    if (positions && positions.length > 0) {
+      positions = positions.filter((p) =>
+        existing.every((e) => dist(p, e.position) >= minDistFromGun)
+      );
+    }
     let position;
     if (positions && positions.length > 0) {
       const pos = positions[Math.floor(Math.random() * positions.length)];
@@ -68,13 +85,14 @@ export function GameManagerProvider({ children }) {
     if (!spawnPositions || spawnPositions.length === 0) return;
     spawnPositionsRef.current = spawnPositions;
     const occupied = getOccupiedBotPositionsRef.current?.() ?? [];
-    const minDist = MIN_DISTANCE_GUN_FROM_PLAYER_SPAWN;
-    const positions = spawnPositions.filter((sp) => {
+    const minDistFromBot = MIN_DISTANCE_GUN_FROM_PLAYER_SPAWN;
+    const minDistFromGun = MIN_DISTANCE_GUN_FROM_GUN;
+    let positions = spawnPositions.filter((sp) => {
       const sx = sp.x ?? 0, sz = sp.z ?? 0;
       const tooClose = occupied.some((o) => {
         const ox = o?.x ?? 0, oz = o?.z ?? 0;
         const dx = sx - ox, dz = sz - oz;
-        return Math.sqrt(dx * dx + dz * dz) < minDist;
+        return Math.sqrt(dx * dx + dz * dz) < minDistFromBot;
       });
       return !tooClose;
     });
@@ -82,13 +100,20 @@ export function GameManagerProvider({ children }) {
     shuffle(positions);
     const pickups = [];
     const count = Math.min(PLAYER_COUNT, positions.length);
+    const chosen = [];
     for (let i = 0; i < count; i++) {
+      const cx = (x) => x?.x ?? 0;
+      const cz = (x) => x?.z ?? 0;
+      const dist = (a, b) => Math.sqrt((cx(a) - cx(b)) ** 2 + (cz(a) - cz(b)) ** 2);
+      positions = positions.filter((p) => chosen.every((c) => dist(p, c) >= minDistFromGun));
+      if (positions.length === 0) break;
+      const pos = positions[0];
+      chosen.push(pos);
       const weaponType = GUN_TYPES[i % GUN_TYPES.length];
-      const pos = positions[i];
       pickups.push({
         id: `pickup-${i}-${Date.now()}`,
         weaponType,
-        position: pos instanceof Vector3 ? pos : new Vector3(pos.x, pos.y, pos.z),
+        position: pos instanceof Vector3 ? pos : new Vector3(pos.x, pos.y ?? 0, pos.z),
         taken: false,
       });
     }

@@ -1,0 +1,11 @@
+---
+description: Claw Shooter lives in this repo only; build from root.
+globs: claw-shooter/**/*, vite.claw-shooter.config.ts, package.json
+---
+
+# Claw Shooter: single source and build
+
+- **Source**: Claw Shooter app lives under `claw-shooter/` at the repo root. Do not use or reference `references/shooter-blitz` for the shooter; that folder may be removed.
+- **Build**: From the repo root run `npm run build:claw-shooter` to build the shooter, or `npm run build` (which includes it). Output goes to `public/claw-shooter/`.
+- **Config**: `vite.claw-shooter.config.ts` at the repo root defines the build (root: `claw-shooter`, base: `/claw-shooter/`, outDir: `public/claw-shooter`).
+- For any shooter changes, edit files in `claw-shooter/` and run the build from the **main project root**; do not run build from a separate reference repo.

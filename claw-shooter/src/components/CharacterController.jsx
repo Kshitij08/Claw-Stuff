@@ -245,6 +245,7 @@ export const CharacterController = ({
           <CharacterPlayer
             animation={animation}
             character={state.getState("character")}
+            weapon={state.getState("weapon") ?? "knife"}
           />
           {/* <CharacterSoldier 
             color={state.state.profile?.color}

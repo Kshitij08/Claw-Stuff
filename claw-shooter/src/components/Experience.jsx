@@ -24,10 +24,8 @@ import {
   PLAYER_COUNT,
 } from "../constants/weapons";
 
-const getRandomCharacter = () => {
-  const characters = ["Bond", "Bambo", "Steve", "Zombie"];
-  return characters[Math.floor(Math.random() * characters.length)];
-};
+/* All players use the G_1.glb model */
+const DEFAULT_CHARACTER = "G_1";
 
 export const Experience = ({ downgradedPerformance = false }) => {
   const [players, setPlayers] = useState([]);
@@ -153,7 +151,7 @@ export const Experience = ({ downgradedPerformance = false }) => {
         state.setState("weapon", WEAPON_TYPES.KNIFE);
         state.setState("ammo", null);
         if (state.getState("character") === undefined)
-          state.setState("character", getRandomCharacter());
+          state.setState("character", DEFAULT_CHARACTER);
         if (state.getState("personality") === undefined)
           state.setState(
             "personality",

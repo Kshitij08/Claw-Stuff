@@ -675,6 +675,7 @@ export const BotController = ({
           <CharacterPlayer
             animation={animation}
             character={state.getState("character")}
+            weapon={state.getState("weapon") ?? "knife"}
           />
         </group>
         <CapsuleCollider args={[0.7, 0.66]} position={[0, 1.28, 0]} />

@@ -194,6 +194,28 @@ async function main() {
         ADD CONSTRAINT betting_leaderboard_pkey PRIMARY KEY (bettor_address, token);
     `);
 
+    // ── NFT challenge and mint tables (for agent free-mint flow) ─────────
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS nft_challenges (
+        id             TEXT PRIMARY KEY,
+        wallet_address TEXT NOT NULL,
+        challenge      TEXT NOT NULL,
+        answer         TEXT NOT NULL,
+        expires_at     TIMESTAMPTZ NOT NULL,
+        used           BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS nft_mints (
+        id              SERIAL PRIMARY KEY,
+        wallet_address  TEXT NOT NULL,
+        token_id        INTEGER NOT NULL,
+        tx_hash         TEXT,
+        minted_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
     await client.query('COMMIT');
     console.log('[migrate] Migrations completed successfully.');
   } catch (err) {

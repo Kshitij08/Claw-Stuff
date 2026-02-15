@@ -109,6 +109,8 @@ export interface JoinRequest {
   mouthId?: string;
   /** Optional 1–2 word strategy tag for personality (e.g. "Balanced", "Hunter") */
   strategyTag?: string;
+  /** Optional NFT skin token ID (must be owned by the agent's registered wallet) */
+  skinTokenId?: number;
 }
 
 export interface JoinResponse {

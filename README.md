@@ -141,6 +141,9 @@ Environment variables:
 - `PORT` - Server port (default: 3000)
 - `NODE_ENV` - Set to `production` to disable test API keys
 - `DATABASE_URL` - Postgres connection string (used in production on Railway)
+- **Betting (Monad):** `MONAD_RPC_URL`, `OPERATOR_PRIVATE_KEY`, `BETTING_CONTRACT_ADDRESS`, `TREASURY_WALLET_ADDRESS`, `MIN_BET_AMOUNT`, `MAX_BET_AMOUNT`
+- **Claw Skins NFT:** `SKIN_NFT_CONTRACT_ADDRESS` (deployed on Monad), `NFT_MINT_PRICE` (e.g. `111000000000000000000` for 111 MON). For deployment only: `NFT_MINT_PRICE_MCLAW_WEI` is the $MClawIO amount (wei) equal to 55.5 MON value—pass as the 6th constructor arg `_initialMintPriceMClaw` (e.g. `212570000000000000000000` for 212.57K $MClawIO). The live price is stored on the contract; update via `setMintPriceMClaw` when the rate changes. Optional `MCLAW_TOKEN_ADDRESS` for the mint UI. NFT stats read via `MONAD_RPC_URL`. Agents mint free via `POST /api/nft/challenge` and `POST /api/nft/mint`.
+- **NFT images & metadata (Cloudflare R2):** All NFT images use the finalized dark-theme Apple-style orb background. To serve from R2: create an R2 bucket and API token, set `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`, and `NFT_IMAGE_BASE_URL` (public base URL, no trailing slash). Run `npm run upload-nft-images` to upload all 5555 images to `claw-skins/{tokenId}.png`, then run `npm run upload-nft-metadata` to upload ERC-721 metadata JSON to `claw-skins/{tokenId}`. Enable public access on the bucket. **Important:** Set the contract’s **baseURI** (via `setBaseURI`) to `{NFT_IMAGE_BASE_URL}/claw-skins/` (with trailing slash) so `tokenURI(tokenId)` returns the metadata URL; otherwise wallets and marketplaces will not show name, description, or image.
 
 ### Database backup (Railway Postgres)
 

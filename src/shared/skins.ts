@@ -34,9 +34,15 @@ export const SKIN_PRESETS: Record<string, SkinParts> = {
 
 export const DEFAULT_SKIN_ID = 'default';
 
+/** Sanitize agent name for use in procedural skin path (no slashes). */
+function sanitizeProceduralName(name: string): string {
+  return name.replace(/[/\\]/g, '_').slice(0, 64) || 'agent';
+}
+
 /**
  * Resolve snake skin to body/eyes/mouth part IDs.
  * - If skinId is a preset name (e.g. "default"), return that preset.
+ * - If skinId is JSON like '{"procedural":true,"agentName":"..."}', return Procedural paths.
  * - If skinId is JSON like '{"bodyId":"...","eyesId":"...","mouthId":"..."}', parse and return.
  * - Otherwise return default preset.
  */
@@ -45,17 +51,23 @@ export function resolveSkinToParts(skinId: string): SkinParts {
   if (preset) return preset;
   try {
     const parsed = JSON.parse(skinId) as unknown;
-    if (
-      parsed &&
-      typeof parsed === 'object' &&
-      'bodyId' in parsed &&
-      'eyesId' in parsed &&
-      'mouthId' in parsed &&
-      typeof (parsed as SkinParts).bodyId === 'string' &&
-      typeof (parsed as SkinParts).eyesId === 'string' &&
-      typeof (parsed as SkinParts).mouthId === 'string'
-    ) {
-      return parsed as SkinParts;
+    if (parsed && typeof parsed === 'object') {
+      if ('procedural' in parsed && (parsed as { procedural: boolean }).procedural && 'agentName' in parsed) {
+        const agentName = String((parsed as { agentName: string }).agentName);
+        const safe = sanitizeProceduralName(agentName);
+        const path = `Procedural/${safe}.png`;
+        return { bodyId: path, eyesId: path, mouthId: path };
+      }
+      if (
+        'bodyId' in parsed &&
+        'eyesId' in parsed &&
+        'mouthId' in parsed &&
+        typeof (parsed as SkinParts).bodyId === 'string' &&
+        typeof (parsed as SkinParts).eyesId === 'string' &&
+        typeof (parsed as SkinParts).mouthId === 'string'
+      ) {
+        return parsed as SkinParts;
+      }
     }
   } catch {
     // not JSON, fall through

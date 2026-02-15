@@ -427,7 +427,7 @@
         </section>
 
         <section class="max-w-7xl mx-auto w-full px-6 mb-24">
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
                 <div class="stat-card">
                     <div class="stat-value text-[#a3e635]" id="home-stat-agents">--</div>
                     <div class="stat-label">Active Agents</div>
@@ -443,6 +443,10 @@
                 <div class="stat-card">
                     <div class="stat-value text-[#d946ef]" id="home-stat-wagered-mclaw">--</div>
                     <div class="stat-label">$MClawIO Wagered</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value text-[#22d3ee]" id="home-stat-nft-minted">--</div>
+                    <div class="stat-label">Skins NFT Minted</div>
                 </div>
             </div>
         </section>
@@ -703,21 +707,37 @@
                                 <div id="skin-preview-label" class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Loading skins...</div>
                             </div>
 
-                            <!-- Buy button -->
-                            <button type="button" class="btn-neo btn-pink w-full mb-3" disabled>
-                                <i data-lucide="shopping-cart" class="w-5 h-5"></i> Buy Skin
-                            </button>
+                            <!-- Mint Skins NFT (111 MON or 55.5 $MClawIO 50% off) -->
+                            <div class="neo-card p-4 mb-3 space-y-3">
+                                <div class="flex justify-between items-center">
+                                    <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Claw Skins NFT</span>
+                                    <span class="text-sm font-mono font-bold text-white" id="nft-minted-count">-- / 5555</span>
+                                </div>
+                                <p class="text-xs text-slate-300">Mint a random combined skin (Body + Eyes + Mouth). Trade on MagicEden.</p>
+                                <div class="flex gap-2 items-stretch">
+                                    <label class="flex-1 cursor-pointer flex flex-col min-h-0">
+                                        <input type="radio" name="nft-pay-token" value="MON" checked class="sr-only peer">
+                                        <span class="block text-center py-2 px-3 rounded-lg border-2 border-white bg-slate-700 text-slate-300 peer-checked:bg-[#22d3ee] peer-checked:text-black peer-checked:border-white text-xs font-bold flex-1 flex items-center justify-center min-h-0">111 MON</span>
+                                    </label>
+                                    <label class="flex-1 cursor-pointer flex flex-col min-h-0">
+                                        <input type="radio" name="nft-pay-token" value="MCLAW" class="sr-only peer">
+                                        <span class="block text-center py-2 px-3 rounded-lg border-2 border-white bg-slate-700 text-slate-300 peer-checked:bg-[#d946ef] peer-checked:text-white peer-checked:border-white text-xs font-bold flex-1 flex flex-wrap items-center justify-center min-h-0 gap-x-1 gap-y-0.5"><span id="nft-mclaw-option-amount">--</span><span>$MClawIO</span><span class="text-[10px] opacity-90 basis-full">(~55.5 MON, 50% off)</span></span>
+                                    </label>
+                                </div>
+                                <button type="button" id="nft-mint-btn" class="btn-neo btn-pink w-full" onclick="window.mintSkinNft && window.mintSkinNft()">
+                                    <i data-lucide="sparkles" class="w-5 h-5"></i> <span id="nft-mint-btn-label">Mint Skin (111 MON)</span>
+                                </button>
+                                <p class="text-[10px] text-slate-500" id="nft-mint-status"></p>
+                            </div>
 
-                            <!-- NFT Marketplace (no link) -->
-                            <div class="block">
-                                <div class="bg-black p-4 text-white shadow-[4px_4px_0_#a3e635] relative overflow-hidden border-2 border-white">
-                                    <div class="relative z-10 flex items-center justify-between">
-                                        <div>
-                                            <div class="text-[10px] font-black uppercase mb-1 text-[#a3e635]">Exclusive</div>
-                                            <div class="text-base neo-font">NFT Marketplace</div>
-                                        </div>
-                                        <i data-lucide="external-link" class="w-5 h-5 text-white"></i>
-                                    </div>
+                            <!-- Your Claw Skins (NFTs owned by connected wallet) -->
+                            <div class="neo-card p-4 mb-3">
+                                <div class="flex justify-between items-center mb-3">
+                                    <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Your Claw Skins</span>
+                                    <span class="text-xs text-slate-500" id="nft-owned-count"></span>
+                                </div>
+                                <div id="nft-owned-list" class="flex flex-wrap gap-3 min-h-[4rem]">
+                                    <p class="text-xs text-slate-500 w-full" id="nft-owned-placeholder">Connect your wallet to see your NFTs.</p>
                                 </div>
                             </div>
                         </div>
@@ -988,6 +1008,13 @@
                 if (monEl) monEl.textContent = formatWager(data.totalWageredMONFormatted);
                 if (mclawEl) mclawEl.textContent = formatWager(data.totalWageredMClawFormatted);
             }).catch(function() {});
+
+            fetch('/api/nft/stats').then(function(r) { return r.ok ? r.json() : null; }).then(function(data) {
+                var nftEl = document.getElementById('home-stat-nft-minted');
+                if (!nftEl) return;
+                if (data && data.totalMinted != null) nftEl.textContent = data.totalMinted + ' / 5555';
+                else nftEl.textContent = '--';
+            }).catch(function() {});
         }
         window.fetchHomeStats = fetchHomeStats;
         fetchHomeStats();
@@ -1086,6 +1113,7 @@
                 tab.setAttribute('aria-selected', 'true');
                 const panel = document.getElementById(`panel-${target}`);
                 if (panel) panel.classList.add('active');
+                if (target === 'skin-human' && typeof window.refreshOwnedNfts === 'function') window.refreshOwnedNfts();
             });
         });
 
@@ -1131,6 +1159,245 @@
             showRandomSkin();
             setInterval(showRandomSkin, 1000);
         })();
+
+        // NFT mint stats and mint action
+        function fetchNftStats() {
+            fetch('/api/nft/stats').then(function(r) { return r.ok ? r.json() : null; }).then(function(data) {
+                var el = document.getElementById('nft-minted-count');
+                if (el && data) el.textContent = (data.totalMinted != null ? data.totalMinted : '--') + ' / 5555';
+            }).catch(function() {});
+        }
+        fetchNftStats();
+        setInterval(fetchNftStats, 30000);
+
+        function getWalletAddressForNfts(cb) {
+            var addr = (window.__reownState && window.__reownState.address) ? window.__reownState.address : null;
+            if (addr) { cb(addr); return; }
+            if (window.ethereum && typeof window.ethereum.request === 'function') {
+                window.ethereum.request({ method: 'eth_accounts' }).then(function(accounts) {
+                    cb(accounts && accounts[0] ? accounts[0] : null);
+                }).catch(function() { cb(null); });
+            } else { cb(null); }
+        }
+
+        function refreshOwnedNfts() {
+            var listEl = document.getElementById('nft-owned-list');
+            var placeholderEl = document.getElementById('nft-owned-placeholder');
+            var countEl = document.getElementById('nft-owned-count');
+            if (!listEl) return;
+            getWalletAddressForNfts(function(address) {
+                if (!address) {
+                    listEl.innerHTML = '';
+                    if (placeholderEl) {
+                        placeholderEl.textContent = 'Connect your wallet to see your NFTs.';
+                        placeholderEl.classList.remove('hidden');
+                        listEl.appendChild(placeholderEl);
+                    }
+                    if (countEl) countEl.textContent = '';
+                    return;
+                }
+                if (placeholderEl) placeholderEl.classList.add('hidden');
+                listEl.innerHTML = '<span class="text-xs text-slate-500">Loading…</span>';
+                fetch('/api/nft/owned/' + encodeURIComponent(address)).then(function(r) { return r.ok ? r.json() : null; }).then(function(data) {
+                    var tokenIds = (data && data.tokenIds) ? data.tokenIds : [];
+                    if (countEl) countEl.textContent = tokenIds.length ? tokenIds.length + ' owned' : '';
+                    listEl.innerHTML = '';
+                    if (tokenIds.length === 0) {
+                        var p = document.createElement('p');
+                        p.className = 'text-xs text-slate-500 w-full';
+                        p.textContent = 'No Claw Skins in this wallet. Mint one above!';
+                        listEl.appendChild(p);
+                        return;
+                    }
+                    var contractAddress = ''; // optional: link to MagicEden/explorer
+                    tokenIds.forEach(function(id) {
+                        var card = document.createElement('a');
+                        card.href = '/api/nft/image/' + id;
+                        card.target = '_blank';
+                        card.rel = 'noopener noreferrer';
+                        card.title = 'Claw Skin #' + id;
+                        card.className = 'block w-20 h-20 rounded-lg border-2 border-white overflow-hidden bg-slate-800 hover:border-[#22d3ee] transition-colors flex-shrink-0 relative';
+                        var img = document.createElement('img');
+                        img.src = '/api/nft/image/' + id;
+                        img.alt = 'Claw Skin #' + id;
+                        img.className = 'w-full h-full object-cover';
+                        img.loading = 'lazy';
+                        var label = document.createElement('span');
+                        label.className = 'absolute bottom-0 left-0 right-0 text-[10px] font-bold bg-black/80 text-white text-center py-0.5';
+                        label.textContent = '#' + id;
+                        card.appendChild(img);
+                        card.appendChild(label);
+                        listEl.appendChild(card);
+                    });
+                }).catch(function() {
+                    listEl.innerHTML = '';
+                    if (placeholderEl) { placeholderEl.textContent = 'Could not load NFTs.'; placeholderEl.classList.remove('hidden'); listEl.appendChild(placeholderEl); }
+                    if (countEl) countEl.textContent = '';
+                });
+            });
+        }
+
+        window.refreshOwnedNfts = refreshOwnedNfts;
+        window.addEventListener('reown-wallet-connected', refreshOwnedNfts);
+        window.addEventListener('reown-wallet-disconnected', refreshOwnedNfts);
+
+        var cachedMclawPriceFormatted = null;
+        function updateNftMclawPriceDisplay() {
+            fetch('/api/nft/contract-info').then(function(r) { return r.ok ? r.json() : null; }).then(function(info) {
+                if (!info || !info.mintPriceMClawWei) return;
+                var wei = BigInt(info.mintPriceMClawWei);
+                cachedMclawPriceFormatted = (Number(wei) / 1e18).toFixed(2).replace(/\.?0+$/, '');
+                var opt = document.getElementById('nft-mclaw-option-amount');
+                if (opt) opt.textContent = cachedMclawPriceFormatted;
+                var radio = document.querySelector('input[name="nft-pay-token"]:checked');
+                if (radio && radio.value === 'MCLAW') {
+                    var btnLabel = document.getElementById('nft-mint-btn-label');
+                    if (btnLabel) btnLabel.textContent = 'Mint Skin (' + cachedMclawPriceFormatted + ' $MClawIO)';
+                }
+            }).catch(function() {});
+        }
+        updateNftMclawPriceDisplay();
+        setInterval(updateNftMclawPriceDisplay, 60000);
+
+        document.querySelectorAll('input[name="nft-pay-token"]').forEach(function(radio) {
+            radio.addEventListener('change', function() {
+                var label = document.getElementById('nft-mint-btn-label');
+                if (!label) return;
+                if (this.value === 'MCLAW') label.textContent = 'Mint Skin (' + (cachedMclawPriceFormatted || '--') + ' $MClawIO)';
+                else label.textContent = 'Mint Skin (111 MON)';
+            });
+        });
+
+        window.mintSkinNft = async function mintSkinNft() {
+            var statusEl = document.getElementById('nft-mint-status');
+            var btn = document.getElementById('nft-mint-btn');
+            function setStatus(msg, isErr) {
+                if (statusEl) { statusEl.textContent = msg || ''; statusEl.style.color = isErr ? '#f87171' : '#94a3b8'; }
+            }
+            function setBusy(b) {
+                if (btn) btn.disabled = b;
+            }
+            try {
+                var infoRes = await fetch('/api/nft/contract-info');
+                if (!infoRes.ok) { setStatus('NFT mint not available', true); return; }
+                var info = await infoRes.json();
+                if (!info.contractAddress || !info.abi || !info.abi.length) { setStatus('Contract not configured', true); return; }
+
+                if (typeof ethers === 'undefined') { setStatus('ethers not loaded', true); return; }
+                var walletProvider = (window.__reownState && window.__reownState.isConnected && window.__reownState.provider) ? window.__reownState.provider : window.ethereum;
+                if (!walletProvider) {
+                    setStatus('Install a wallet or connect via the Connect button', true);
+                    return;
+                }
+                var provider = new ethers.BrowserProvider(walletProvider);
+                var signer = await provider.getSigner().catch(function() { return null; });
+                if (!signer) {
+                    setStatus('Connect your wallet to mint...');
+                    if (typeof window.openReownConnect === 'function') window.openReownConnect();
+                    else if (typeof window.connectWallet === 'function') window.connectWallet();
+                    return;
+                }
+
+                var expectedChainId = 143;
+                var net = await provider.getNetwork();
+                var currentChainId = Number(net.chainId);
+                if (currentChainId !== expectedChainId && info.chain) {
+                    setStatus('Switching to Monad...');
+                    try {
+                        await walletProvider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x8f' }] });
+                    } catch (switchErr) {
+                        if (switchErr.code === 4902 && info.chain.rpcUrls && info.chain.rpcUrls[0]) {
+                            await walletProvider.request({
+                                method: 'wallet_addEthereumChain',
+                                params: [{
+                                    chainId: '0x8f',
+                                    chainName: 'Monad',
+                                    rpcUrls: info.chain.rpcUrls,
+                                    nativeCurrency: { name: 'MON', symbol: 'MON', decimals: 18 },
+                                    blockExplorerUrls: info.chain.blockExplorerUrls || ['https://monadvision.com'],
+                                }],
+                            });
+                        } else {
+                            setStatus('Switch to Monad in your wallet to mint', true);
+                            return;
+                        }
+                    }
+                    // Re-create provider and signer after chain switch so they point to Monad
+                    provider = new ethers.BrowserProvider(walletProvider);
+                    signer = await provider.getSigner();
+                }
+
+                setBusy(true);
+                var payWithMclaw = (document.querySelector('input[name="nft-pay-token"]:checked') || {}).value === 'MCLAW';
+                var contract = new ethers.Contract(info.contractAddress, info.abi, signer);
+
+                if (payWithMclaw && info.mintPriceMClawWei && info.mclawTokenAddress) {
+                    var mclawAmountWei = typeof info.mintPriceMClawWei === 'string' ? BigInt(info.mintPriceMClawWei) : info.mintPriceMClawWei;
+                    var mclawFormatted = (Number(mclawAmountWei) / 1e18).toFixed(2).replace(/\.?0+$/, '');
+                    setStatus('Checking $MClawIO balance and allowance...');
+                    var erc20Abi = [{ inputs: [{ name: 'account', type: 'address' }], name: 'balanceOf', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' }, { inputs: [{ name: 'owner', type: 'address' }, { name: 'spender', type: 'address' }], name: 'allowance', outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' }, { inputs: [{ name: 'spender', type: 'address' }, { name: 'amount', type: 'uint256' }], name: 'approve', outputs: [{ type: 'bool' }], stateMutability: 'nonpayable', type: 'function' }];
+                    var mclaw = new ethers.Contract(info.mclawTokenAddress, erc20Abi, signer);
+                    var userAddr = await signer.getAddress();
+                    var balance, allowance;
+                    try {
+                        balance = await mclaw.balanceOf(userAddr);
+                        allowance = await mclaw.allowance(userAddr, info.contractAddress);
+                    } catch (tokenErr) {
+                        var tokenMsg = (tokenErr && (tokenErr.message || tokenErr.reason || String(tokenErr))) || 'unknown';
+                        setStatus('Cannot read $MClawIO token at ' + info.mclawTokenAddress + '. Is it deployed on Monad? Check on MonadScan. Error: ' + String(tokenMsg).slice(0, 80), true);
+                        return;
+                    }
+                    if (balance < mclawAmountWei) {
+                        setStatus('Insufficient $MClawIO. Need ' + mclawFormatted + ', you have ' + (Number(balance) / 1e18).toFixed(2).replace(/\.?0+$/, '') + '.', true);
+                        return;
+                    }
+                    setStatus('Approve $MClawIO then confirm mint...');
+                    var maxAllowance = BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff');
+                    if (allowance < mclawAmountWei) {
+                        if (allowance > 0n) {
+                            var resetTx = await mclaw.approve(info.contractAddress, 0n);
+                            setStatus('Resetting $MClawIO approval...');
+                            await resetTx.wait();
+                        }
+                        var approveTx = await mclaw.approve(info.contractAddress, maxAllowance);
+                        setStatus('Approving $MClawIO (one-time)...');
+                        await approveTx.wait();
+                    }
+                    setStatus('Confirm mint in your wallet (' + mclawFormatted + ' $MClawIO)...');
+                    try {
+                        await contract.publicMintWithMClaw.staticCall();
+                    } catch (simErr) {
+                        var reason = (simErr && (simErr.reason || simErr.message || simErr.data && String(simErr.data)));
+                        if (reason) setStatus('Pre-check failed: ' + (reason.length > 60 ? reason.slice(0, 60) + '…' : reason), true);
+                        return;
+                    }
+                    var tx = await contract.publicMintWithMClaw();
+                    setStatus('Minting...');
+                    var receipt = await tx.wait();
+                } else {
+                    var mintPriceWei = typeof info.mintPriceWei === 'string' ? BigInt(info.mintPriceWei) : info.mintPriceWei;
+                    var currency = (info.chain && info.chain.nativeCurrency && info.chain.nativeCurrency.symbol) || 'MON';
+                    setStatus('Confirm mint in your wallet (111 ' + currency + ')...');
+                    var tx = await contract.publicMint({ value: mintPriceWei });
+                    setStatus('Minting...');
+                    var receipt = await tx.wait();
+                }
+                setStatus('Minted! Token ID in tx.');
+                fetchNftStats();
+                if (typeof window.refreshOwnedNfts === 'function') window.refreshOwnedNfts();
+                if (typeof window.showToast === 'function') window.showToast('Skin NFT minted!', 'success');
+            } catch (err) {
+                var msg = (err && err.message) ? err.message : String(err);
+                if (msg.includes('user rejected') || msg.includes('denied')) setStatus('Transaction cancelled');
+                else if (msg.includes('missing revert data') || msg.includes('estimateGas') || msg.includes('execution reverted')) {
+                    var payWithMclawErr = (document.querySelector('input[name="nft-pay-token"]:checked') || {}).value === 'MCLAW';
+                    if (payWithMclawErr) setStatus('Mint failed. Refresh the page (uses contract\u2019s token address), approve again, then mint. If it still fails, check the contract on MonadScan.', true);
+                    else setStatus('Switch to Monad in your wallet and ensure you have 111 MON', true);
+                } else setStatus(msg.slice(0, 100), true);
+            } finally {
+                setBusy(false);
+            }
+        };
     </script>
     <!-- Toast Notification Container -->
     <div id="toast-container" class="fixed top-4 right-4 z-[9999] flex flex-col gap-2 pointer-events-none" style="max-width: 340px;"></div>

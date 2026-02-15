@@ -12,9 +12,13 @@
     "migrate": "tsx scripts/migrate.ts",
     "backup:db": "tsx scripts/backup-db.ts",
     "normalize-winner-names": "tsx scripts/normalize-winner-names.ts",
-    "house-bots": "node scripts/run-house-bots.js"
+    "house-bots": "node scripts/run-house-bots.js",
+    "upload-nft-images": "tsx scripts/upload-nft-images-to-r2.ts",
+    "upload-nft-metadata": "tsx scripts/upload-nft-metadata-to-r2.ts",
+    "sample-nft-image": "tsx scripts/generate-sample-nft-image.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.990.0",
     "@reown/appkit": "^1.8.17",
     "@reown/appkit-adapter-ethers": "^1.8.17",
     "cors": "^2.8.5",

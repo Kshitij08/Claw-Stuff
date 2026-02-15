@@ -9,7 +9,9 @@ import { dirname, join } from 'path';
 import { MatchManager } from './game/match.js';
 import { createRoutes } from './api/routes.js';
 import { createBettingRoutes } from './betting/routes.js';
+import { createNftRoutes } from './nft/routes.js';
 import { setEmitter } from './betting/service.js';
+import { getProceduralBodyBuffer, getProceduralEyesBuffer, getProceduralMouthBuffer } from './snakeGenerator.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -43,6 +45,44 @@ const io = new SocketIOServer(httpServer, {
 app.use(cors());
 app.use(express.json());
 
+// Procedural skin images (must be before static so they take precedence)
+function decodeProceduralAgent(agent: string): string {
+  return decodeURIComponent(agent.replace(/\.png$/i, '')).replace(/[/\\]/g, '_') || 'agent';
+}
+app.get('/skins/Body/Procedural/:agent', async (req, res) => {
+  try {
+    const agentName = decodeProceduralAgent(req.params.agent);
+    const buffer = await getProceduralBodyBuffer(agentName);
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(buffer);
+  } catch {
+    res.status(404).send('Not found');
+  }
+});
+app.get('/skins/Eyes/Procedural/:agent', async (req, res) => {
+  try {
+    const agentName = decodeProceduralAgent(req.params.agent);
+    const buffer = await getProceduralEyesBuffer(agentName);
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(buffer);
+  } catch {
+    res.status(404).send('Not found');
+  }
+});
+app.get('/skins/Mouth/Procedural/:agent', async (req, res) => {
+  try {
+    const agentName = decodeProceduralAgent(req.params.agent);
+    const buffer = await getProceduralMouthBuffer(agentName);
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(buffer);
+  } catch {
+    res.status(404).send('Not found');
+  }
+});
+
 // Serve OpenClaw skill documentation so agents can discover rules/controls
 app.get('/skill.md', (req, res) => {
   res.type('text/markdown');
@@ -58,6 +98,7 @@ const matchManager = new MatchManager();
 // API routes
 app.use('/api', createRoutes(matchManager));
 app.use('/api/betting', createBettingRoutes());
+app.use('/api', createNftRoutes());
 
 // Wire betting service WebSocket emitter so betting events are broadcast to spectators
 setEmitter((event: string, data: any) => {

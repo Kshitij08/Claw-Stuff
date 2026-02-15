@@ -11,8 +11,29 @@ import { resolveSkinToParts, toStoredSkinId, SKIN_PRESETS, DEFAULT_SKIN_ID } fro
 import { getSkinOptions } from '../skinOptions.js';
 import { generateSnake, getSkinPartPaths } from '../snakeGenerator.js';
 import { ARENA_WIDTH, ARENA_HEIGHT, TICK_INTERVAL } from '../../shared/constants.js';
+import * as bettingService from '../betting/service.js';
+import { ownerOf } from '../nft/contract.js';
+import { getTokenSkinParts } from '../nft/skinTokenMap.js';
 
 const DEV_MODE = process.env.NODE_ENV !== 'production';
+
+/** Cache (wallet, tokenId) -> owns (5 min TTL). */
+const ownershipCache = new Map<string, boolean>();
+const OWNERSHIP_CACHE_TTL_MS = 5 * 60 * 1000;
+const ownershipCacheTime = new Map<string, number>();
+function cacheKey(w: string, t: number) { return `${w.toLowerCase()}:${t}`; }
+async function walletOwnsToken(wallet: string, tokenId: number): Promise<boolean> {
+  const key = cacheKey(wallet, tokenId);
+  const now = Date.now();
+  if (ownershipCache.has(key) && (ownershipCacheTime.get(key) ?? 0) + OWNERSHIP_CACHE_TTL_MS > now) {
+    return ownershipCache.get(key)!;
+  }
+  const owner = await ownerOf(tokenId);
+  const owns = owner !== null && owner.toLowerCase() === wallet.toLowerCase();
+  ownershipCache.set(key, owns);
+  ownershipCacheTime.set(key, now);
+  return owns;
+}
 
 export function createRoutes(matchManager: MatchManager): Router {
   const router = Router();
@@ -72,9 +93,23 @@ export function createRoutes(matchManager: MatchManager): Router {
       }
     }
 
-    // Resolve skin: custom bodyId/eyesId/mouthId combo, or preset skinId (must be owned).
+    // Resolve skin: NFT skinTokenId (must be owned by agent wallet), or custom bodyId/eyesId/mouthId, or preset, or procedural fallback.
     let storedSkinId: string;
-    if (body.bodyId != null && body.eyesId != null && body.mouthId != null) {
+    const skinTokenId = typeof body.skinTokenId === 'number' && body.skinTokenId >= 1 && body.skinTokenId <= 5555 ? body.skinTokenId : null;
+
+    if (skinTokenId !== null) {
+      const wallet = await bettingService.getAgentWallet(agentInfo.name, apiKey);
+      if (wallet && (await walletOwnsToken(wallet, skinTokenId))) {
+        const parts = getTokenSkinParts(skinTokenId);
+        if (parts) {
+          storedSkinId = toStoredSkinId(parts);
+        } else {
+          storedSkinId = JSON.stringify({ procedural: true, agentName: agentInfo.name });
+        }
+      } else {
+        storedSkinId = JSON.stringify({ procedural: true, agentName: agentInfo.name });
+      }
+    } else if (body.bodyId != null && body.eyesId != null && body.mouthId != null) {
       const options = getSkinOptions();
       const bodyOk = options.bodies.includes(body.bodyId);
       const eyesOk = options.eyes.includes(body.eyesId);
@@ -86,7 +121,7 @@ export function createRoutes(matchManager: MatchManager): Router {
           mouthId: body.mouthId,
         });
       } else {
-        storedSkinId = DEFAULT_SKIN_ID;
+        storedSkinId = JSON.stringify({ procedural: true, agentName: agentInfo.name });
       }
     } else {
       const isTestAgent = DEV_MODE && apiKey.startsWith('test_');
@@ -100,11 +135,11 @@ export function createRoutes(matchManager: MatchManager): Router {
           if (body.skinId && validOwnedSet.has(body.skinId)) {
             storedSkinId = body.skinId;
           } else {
-            storedSkinId = DEFAULT_SKIN_ID;
+            storedSkinId = JSON.stringify({ procedural: true, agentName: agentInfo.name });
           }
         } catch (err) {
-          console.error('[api] Failed to resolve owned skins, falling back to default:', err);
-          storedSkinId = DEFAULT_SKIN_ID;
+          console.error('[api] Failed to resolve owned skins, falling back to procedural:', err);
+          storedSkinId = JSON.stringify({ procedural: true, agentName: agentInfo.name });
         }
       }
     }

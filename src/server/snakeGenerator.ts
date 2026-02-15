@@ -25,6 +25,10 @@ export interface SnakeGeneratorConfig {
   segmentScaleMultiplier?: number;
   canvas: { width: number; height: number };
   padding: number;
+  /** Optional solid background color (e.g. '#f5f5f5'). If omitted, background is transparent. */
+  backgroundColor?: string;
+  /** Optional pattern: 'dot-grid' uses site theme colors (neo-bg + slate dots + subtle pop accents). */
+  backgroundPattern?: 'dot-grid';
 }
 
 const DEFAULT_CONFIG: SnakeGeneratorConfig = {
@@ -80,6 +84,115 @@ async function loadSkiaCanvas(): Promise<typeof skiaCanvas> {
 export async function isGeneratorAvailable(): Promise<boolean> {
   const skia = await loadSkiaCanvas();
   return skia !== null;
+}
+
+const PROCEDURAL_SIZE = 64;
+
+/** Simple hash of string to number for deterministic color. */
+function hashString(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h);
+}
+
+/** Deterministic hue (0–360) from agent name; saturation and lightness fixed. */
+function agentNameToColor(name: string): string {
+  const h = hashString(name) % 360;
+  return `hsl(${h}, 70%, 50%)`;
+}
+
+const proceduralCache = new Map<string, { body: Buffer; eyes: Buffer; mouth: Buffer }>();
+const PROCEDURAL_CACHE_MAX = 200;
+
+export interface ProceduralSkinBuffers {
+  body: Buffer;
+  eyes: Buffer;
+  mouth: Buffer;
+}
+
+/** Generate procedural body (colored circle), eyes (two dots), mouth (simple line). Cached per agent name. */
+export async function generateProceduralSkin(agentName: string): Promise<ProceduralSkinBuffers> {
+  const cached = proceduralCache.get(agentName);
+  if (cached) return cached;
+
+  const skia = await loadSkiaCanvas();
+  if (!skia) {
+    throw new Error('skia-canvas required for procedural skins');
+  }
+
+  const Canvas = skia.Canvas as new (w: number, h: number) => {
+    getContext(ctx: string): CanvasRenderingContext2D;
+    toBuffer(format: string): Promise<Buffer>;
+  };
+  const size = PROCEDURAL_SIZE;
+  const cx = size / 2;
+  const cy = size / 2;
+  const bodyRadius = size * 0.4;
+  const color = agentNameToColor(agentName);
+
+  const bodyCanvas = new Canvas(size, size);
+  const bodyCtx = bodyCanvas.getContext('2d');
+  bodyCtx.fillStyle = color;
+  bodyCtx.beginPath();
+  bodyCtx.arc(cx, cy, bodyRadius, 0, Math.PI * 2);
+  bodyCtx.fill();
+
+  const eyesCanvas = new Canvas(size, size);
+  const eyesCtx = eyesCanvas.getContext('2d');
+  const eyeRadius = 4;
+  const eyeOffsetX = 10;
+  const eyeOffsetY = 8;
+  eyesCtx.fillStyle = '#fff';
+  eyesCtx.beginPath();
+  eyesCtx.arc(cx - eyeOffsetX, cy - eyeOffsetY, eyeRadius, 0, Math.PI * 2);
+  eyesCtx.arc(cx + eyeOffsetX, cy - eyeOffsetY, eyeRadius, 0, Math.PI * 2);
+  eyesCtx.fill();
+  eyesCtx.fillStyle = '#000';
+  eyesCtx.beginPath();
+  eyesCtx.arc(cx - eyeOffsetX, cy - eyeOffsetY, 2, 0, Math.PI * 2);
+  eyesCtx.arc(cx + eyeOffsetX, cy - eyeOffsetY, 2, 0, Math.PI * 2);
+  eyesCtx.fill();
+
+  const mouthCanvas = new Canvas(size, size);
+  const mouthCtx = mouthCanvas.getContext('2d');
+  mouthCtx.strokeStyle = '#333';
+  mouthCtx.lineWidth = 2;
+  mouthCtx.beginPath();
+  mouthCtx.moveTo(cx - 12, cy + 10);
+  mouthCtx.lineTo(cx + 12, cy + 10);
+  mouthCtx.stroke();
+
+  const body = await bodyCanvas.toBuffer('png');
+  const eyes = await eyesCanvas.toBuffer('png');
+  const mouth = await mouthCanvas.toBuffer('png');
+
+  const result = { body, eyes, mouth };
+  if (proceduralCache.size >= PROCEDURAL_CACHE_MAX) {
+    const firstKey = proceduralCache.keys().next().value;
+    if (firstKey !== undefined) proceduralCache.delete(firstKey);
+  }
+  proceduralCache.set(agentName, result);
+  return result;
+}
+
+/** Get only the body buffer for procedural skin (for serving /skins/Body/Procedural/:agent). */
+export async function getProceduralBodyBuffer(agentName: string): Promise<Buffer> {
+  const skin = await generateProceduralSkin(agentName);
+  return skin.body;
+}
+
+/** Get only the eyes buffer. */
+export async function getProceduralEyesBuffer(agentName: string): Promise<Buffer> {
+  const skin = await generateProceduralSkin(agentName);
+  return skin.eyes;
+}
+
+/** Get only the mouth buffer. */
+export async function getProceduralMouthBuffer(agentName: string): Promise<Buffer> {
+  const skin = await generateProceduralSkin(agentName);
+  return skin.mouth;
 }
 
 async function loadImage(filePath: string): Promise<unknown> {
@@ -165,6 +278,23 @@ function computeTangents(points: { x: number; y: number }[]): number[] {
   });
 }
 
+/** Theme colors from the site (Dark Neo Toon) for NFT background. */
+const THEME = {
+  neoBg: '#020617',
+  slateCard: '#1e293b',
+  slateDot: '#475569',
+  popCyan: '#22d3ee',
+  popPink: '#d946ef',
+  popYellow: '#facc15',
+  popLime: '#a3e635',
+};
+
+/** Dark-theme tints for blurred shapes: same hues, deeper/darker so background stays dark. */
+const DARK_POP_COLORS = ['#0e7490', '#701a75', '#854d0e', '#166534'] as const;
+
+/** Apple-style refined orbs: muted, soft hues (teal, violet, amber, sage) for radial gradients. */
+const APPLE_ORB_COLORS = ['#1a4d6d', '#3d2a5c', '#4a3d1f', '#1b4d3a'] as const;
+
 interface DrawContext {
   save(): void;
   restore(): void;
@@ -172,6 +302,54 @@ interface DrawContext {
   translate(x: number, y: number): void;
   rotate(r: number): void;
   drawImage(img: unknown, x: number, y: number, w: number, h: number): void;
+  fillStyle: string;
+  fillRect(x: number, y: number, w: number, h: number): void;
+  beginPath(): void;
+  arc(x: number, y: number, r: number, start: number, end: number): void;
+  fill(): void;
+  createRadialGradient(x0: number, y0: number, r0: number, x1: number, y1: number, r1: number): { addColorStop(t: number, c: string): void };
+}
+
+/** Pop colors (bright) – kept for reference; dark theme uses DARK_POP_COLORS. */
+const POP_COLORS = [THEME.popCyan, THEME.popPink, THEME.popYellow, THEME.popLime] as const;
+
+/** Apple-style orbs: fewer, larger; cx, cy and r as fraction of size. Soft radial gradient per orb. */
+const APPLE_ORBS: { cx: number; cy: number; r: number }[] = [
+  { cx: 0.25, cy: 0.4, r: 0.58 },
+  { cx: 0.72, cy: 0.35, r: 0.52 },
+  { cx: 0.5, cy: 0.78, r: 0.55 },
+  { cx: 0.82, cy: 0.72, r: 0.48 },
+  { cx: 0.18, cy: 0.7, r: 0.5 },
+];
+
+/** Final NFT background: Apple-style soft orbs (radial gradients + light blur), dark theme. */
+function drawNftBackground(ctx: DrawContext, width: number, height: number): void {
+  const c = ctx as unknown as { globalAlpha: number; filter: string };
+  const minDim = Math.min(width, height);
+  const blurPx = Math.max(60, minDim * 0.05);
+
+  ctx.fillStyle = THEME.neoBg;
+  ctx.fillRect(0, 0, width, height);
+
+  c.filter = `blur(${blurPx}px)`;
+  c.globalAlpha = 0.85;
+  APPLE_ORBS.forEach((shape, i) => {
+    const cx = shape.cx * width;
+    const cy = shape.cy * height;
+    const r = shape.r * minDim;
+    const color = APPLE_ORB_COLORS[i % APPLE_ORB_COLORS.length];
+    const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    gradient.addColorStop(0, color + '99');   // center: color at ~60% alpha
+    gradient.addColorStop(0.4, color + '4d'); // mid: ~30%
+    gradient.addColorStop(0.7, color + '1a'); // edge: ~10%
+    gradient.addColorStop(1, 'transparent');
+    ctx.fillStyle = gradient as unknown as string;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  c.globalAlpha = 1;
+  c.filter = 'none';
 }
 
 function drawBodySegments(
@@ -265,16 +443,27 @@ export async function generateSnake(
   const tailHalfWidth = (baseW * partScale * (cfg.tailScale ?? 0.25) * segmentScaleMultiplier) / 2;
   const requiredWidth = 2 * padding + effectiveLength + headHalfWidth + tailHalfWidth;
   const requiredHeight = 2 * padding + 2 * amplitude + baseH * partScale * segmentScaleMultiplier;
-  const canvasWidth = Math.ceil(Math.max(cfg.canvas.width, requiredWidth));
-  const canvasHeight = Math.ceil(Math.max(cfg.canvas.height, requiredHeight));
+  let canvasWidth = Math.ceil(Math.max(cfg.canvas.width, requiredWidth));
+  let canvasHeight = Math.ceil(Math.max(cfg.canvas.height, requiredHeight));
+  if (cfg.canvas.width === cfg.canvas.height) {
+    const size = Math.ceil(Math.max(cfg.canvas.width, requiredWidth, requiredHeight));
+    canvasWidth = size;
+    canvasHeight = size;
+  }
 
   const Canvas = skia.Canvas as new (w: number, h: number) => {
     getContext(ctx: string): DrawContext;
     toBuffer(format: string): Promise<Buffer>;
   };
   const canvas = new Canvas(canvasWidth, canvasHeight);
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d') as DrawContext;
   ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+  if (cfg.backgroundPattern === 'dot-grid') {
+    drawNftBackground(ctx, canvasWidth, canvasHeight);
+  } else if (cfg.backgroundColor) {
+    ctx.fillStyle = cfg.backgroundColor;
+    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+  }
 
   const placement = drawBodySegments(
     ctx,

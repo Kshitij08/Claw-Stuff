@@ -9,6 +9,7 @@ export function GameManagerProvider({ children }) {
   const [countdown, setCountdown] = useState(0);
   const [weaponPickups, setWeaponPickups] = useState([]);
   const [finalRanking, setFinalRanking] = useState([]);
+  const [selectedBotId, setSelectedBotId] = useState(null); // null = free cam, string = third-person follow that bot
   const countdownRef = useRef(null);
   const spawnPositionsRef = useRef([]);
   /** Set by Experience: () => array of {x,y,z} currently occupied by bots (alive, not dead) */
@@ -170,6 +171,8 @@ export function GameManagerProvider({ children }) {
     restartRound,
     finalRanking,
     getOccupiedBotPositionsRef,
+    selectedBotId,
+    setSelectedBotId,
   };
 
   return (

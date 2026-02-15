@@ -12,6 +12,7 @@ import { Bullet } from "./Bullet";
 import { BulletHit } from "./BulletHit";
 import { BotController, PlayerBot } from "./BotController";
 import { WeaponPickup } from "./WeaponPickup";
+import { BotClickCapture } from "./BotClickCapture";
 import { useGameManager } from "./GameManager";
 import { useFrame, useThree } from "@react-three/fiber";
 import { Vector3 } from "three";
@@ -354,6 +355,7 @@ export const Experience = ({ downgradedPerformance = false }) => {
 
   return (
     <>
+      <BotClickCapture />
       <MapWithFallback />
       {weaponPickups.map((p) => (
         <WeaponPickup

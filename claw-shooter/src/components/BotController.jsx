@@ -736,7 +736,7 @@ export const BotController = ({
 
     /* ── Broadcast own state so all bots share awareness ── */
     if (isHost()) {
-      state.setState("pos", pos);
+      state.setState("pos", { x: Number(pos.x), y: Number(pos.y), z: Number(pos.z) });
       state.setState("weapon", weapon);
       state.setState("ammo", ammo);
     } else {
@@ -747,7 +747,7 @@ export const BotController = ({
 
   /* ── Render ── */
   return (
-    <group ref={group} {...props}>
+    <group ref={group} userData={{ botId: state.id }} {...props}>
       <RigidBody
         key={bodyKey}
         ref={rigidbody}

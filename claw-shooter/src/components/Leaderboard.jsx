@@ -4,7 +4,7 @@ import { WEAPON_LABELS } from "../constants/weapons";
 
 export const Leaderboard = () => {
   const allPlayers = usePlayersList(true);
-  const { gamePhase, finalRanking, countdown, startMatch } = useGameManager();
+  const { gamePhase, finalRanking, countdown, startMatch, selectedBotId, setSelectedBotId } = useGameManager();
 
   /* Only show bots in the leaderboard – the local spectator/host is not a participant */
   const players = allPlayers.filter(
@@ -43,11 +43,14 @@ export const Leaderboard = () => {
         </div>
       )}
 
-      {/* Playing: top bar with player stats */}
+      {/* Playing: top bar with player stats — click a bot to follow in third-person; Escape to free cam */}
       {gamePhase === "playing" && (
-        <div className="fixed top-0 left-0 right-0 p-4 flex z-10 gap-4 flex-wrap">
+        <div className="fixed top-0 left-0 right-0 p-4 flex z-10 gap-4 flex-wrap items-start">
           <div className="bg-white/70 backdrop-blur-sm rounded-lg px-3 py-2 font-bold text-sm">
             Alive: {aliveCount} / {players.length}
+          </div>
+          <div className="bg-black/40 text-white/90 text-xs rounded-lg px-2 py-1.5">
+            Click bot or card to follow • Left-drag to orbit • Click again or Esc = free cam
           </div>
           {players.map((player) => {
             const state = player.state;
@@ -70,10 +73,15 @@ export const Leaderboard = () => {
               state?.profile?.color ??
               "#888";
             const weaponLabel = WEAPON_LABELS[weapon] || weapon;
+            const isSelected = selectedBotId === player.id;
             return (
               <div
                 key={player.id}
-                className={`bg-white/60 backdrop-blur-sm flex items-center rounded-lg gap-2 p-2 min-w-[180px] ${eliminated ? "opacity-50" : ""}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => setSelectedBotId(isSelected ? null : player.id)}
+                onKeyDown={(e) => e.key === "Enter" && setSelectedBotId(isSelected ? null : player.id)}
+                className={`bg-white/60 backdrop-blur-sm flex items-center rounded-lg gap-2 p-2 min-w-[180px] cursor-pointer select-none transition ring-2 ${eliminated ? "opacity-50" : ""} ${isSelected ? "ring-blue-500 ring-offset-2" : "ring-transparent"}`}
               >
                 <div
                   className="w-8 h-8 rounded-full border-2 flex-shrink-0"

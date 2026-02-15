@@ -71,15 +71,14 @@ export function GameManagerProvider({ children }) {
 
   const checkWinCondition = useCallback((players) => {
     if (gamePhase !== "playing") return;
-    const alive = players.filter((p) => {
+    /* Game ends when at most one bot still has lives left (each bot starts with 3 lives) */
+    const withLivesLeft = players.filter((p) => {
       const state = p.state;
       if (!state) return false;
-      const eliminated = state.getState?.("eliminated") ?? state.eliminated;
       const lives = state.getState?.("lives") ?? state.lives ?? 3;
-      const dead = state.getState?.("dead") ?? state.dead;
-      return !eliminated && lives > 0 && !dead;
+      return lives > 0;
     });
-    if (alive.length <= 1) {
+    if (withLivesLeft.length <= 1) {
       const ranking = [...players]
         .filter((p) => p.state)
         .sort((a, b) => {

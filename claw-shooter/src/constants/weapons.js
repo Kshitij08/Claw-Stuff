@@ -105,3 +105,15 @@ export const MAP_BOUNDS = {
   minZ: -45,
   maxZ: 45,
 };
+
+/** Human-readable weapon names for UI */
+export const WEAPON_LABELS = {
+  [WEAPON_TYPES.KNIFE]: "Knife",
+  [WEAPON_TYPES.PISTOL]: "Pistol",
+  [WEAPON_TYPES.SMG]: "SMG",
+  [WEAPON_TYPES.SHOTGUN]: "Shotgun",
+  [WEAPON_TYPES.ASSAULT_RIFLE]: "Assault Rifle",
+};
+
+/** Delay (ms) before a new set of weapon pickups spawns after all are taken */
+export const WEAPON_RESPAWN_DELAY = 5000;

@@ -1,5 +1,6 @@
 import { usePlayersList } from "playroomkit";
 import { useGameManager } from "./GameManager";
+import { WEAPON_LABELS } from "../constants/weapons";
 
 export const Leaderboard = () => {
   const allPlayers = usePlayersList(true);
@@ -60,14 +61,19 @@ export const Leaderboard = () => {
             const lives = state?.getState?.("lives") ?? state?.lives ?? 3;
             const eliminated =
               state?.getState?.("eliminated") ?? state?.eliminated;
+            const weapon =
+              state?.getState?.("weapon") ?? state?.weapon ?? "knife";
+            const ammo =
+              state?.getState?.("ammo") ?? state?.ammo ?? null;
             const color =
               state?.getProfile?.()?.color?.hexString ??
               state?.profile?.color ??
               "#888";
+            const weaponLabel = WEAPON_LABELS[weapon] || weapon;
             return (
               <div
                 key={player.id}
-                className={`bg-white/60 backdrop-blur-sm flex items-center rounded-lg gap-2 p-2 min-w-[120px] ${eliminated ? "opacity-50" : ""}`}
+                className={`bg-white/60 backdrop-blur-sm flex items-center rounded-lg gap-2 p-2 min-w-[180px] ${eliminated ? "opacity-50" : ""}`}
               >
                 <div
                   className="w-8 h-8 rounded-full border-2 flex-shrink-0"
@@ -75,10 +81,14 @@ export const Leaderboard = () => {
                 />
                 <div className="flex-grow min-w-0">
                   <h2 className="font-bold text-xs truncate">{name}</h2>
-                  <div className="flex text-xs gap-2">
-                    <span>K:{kills}</span>
-                    <span>D:{deaths}</span>
-                    <span>L:{lives}</span>
+                  <div className="flex text-xs gap-2 flex-wrap">
+                    <span>Kills: {kills}</span>
+                    <span>Deaths: {deaths}</span>
+                    <span>Lives: {lives}</span>
+                  </div>
+                  <div className="text-[10px] text-gray-600 truncate">
+                    {weaponLabel}
+                    {weapon !== "knife" && ammo != null ? ` (${ammo})` : ""}
                   </div>
                 </div>
               </div>

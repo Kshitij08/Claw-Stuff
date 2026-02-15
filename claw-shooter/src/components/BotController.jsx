@@ -694,16 +694,44 @@ export const BotController = ({
       });
     }
 
-    /* ── Clamp to map bounds ── */
+    /* ── Keep inside map: if out of bounds, respawn at a valid spawn; else clamp to edge ── */
     let pos = rigidbody.current.translation();
-    const cx = Math.max(MAP_BOUNDS.minX, Math.min(MAP_BOUNDS.maxX, pos.x));
-    const cz = Math.max(MAP_BOUNDS.minZ, Math.min(MAP_BOUNDS.maxZ, pos.z));
-    if (cx !== pos.x || cz !== pos.z) {
-      rigidbody.current.setTranslation({ x: cx, y: pos.y, z: cz });
-      /* Randomize wander direction when hitting a boundary */
+    const outOfBounds =
+      pos.x < MAP_BOUNDS.minX ||
+      pos.x > MAP_BOUNDS.maxX ||
+      pos.z < MAP_BOUNDS.minZ ||
+      pos.z > MAP_BOUNDS.maxZ;
+
+    if (outOfBounds && isHost()) {
+      const fn = spawnFnRef.current ?? getEmptySpawnPosition;
+      const newPos = fn(null);
+      if (newPos) {
+        rigidbody.current.setTranslation({
+          x: newPos.x ?? 0,
+          y: newPos.y ?? 0,
+          z: newPos.z ?? 0,
+        });
+        rigidbody.current.setLinvel({ x: 0, y: 0, z: 0 });
+      } else {
+        rigidbody.current.setTranslation({
+          x: MAP_BOUNDS.minX + Math.random() * (MAP_BOUNDS.maxX - MAP_BOUNDS.minX),
+          y: pos.y,
+          z: MAP_BOUNDS.minZ + Math.random() * (MAP_BOUNDS.maxZ - MAP_BOUNDS.minZ),
+        });
+        rigidbody.current.setLinvel({ x: 0, y: 0, z: 0 });
+      }
       wanderAngleRef.current = Math.random() * Math.PI * 2;
       wanderChangeTimeRef.current = now;
       pos = rigidbody.current.translation();
+    } else {
+      const cx = Math.max(MAP_BOUNDS.minX, Math.min(MAP_BOUNDS.maxX, pos.x));
+      const cz = Math.max(MAP_BOUNDS.minZ, Math.min(MAP_BOUNDS.maxZ, pos.z));
+      if (cx !== pos.x || cz !== pos.z) {
+        rigidbody.current.setTranslation({ x: cx, y: pos.y, z: cz });
+        wanderAngleRef.current = Math.random() * Math.PI * 2;
+        wanderChangeTimeRef.current = now;
+        pos = rigidbody.current.translation();
+      }
     }
 
     /* ── Broadcast own state so all bots share awareness ── */

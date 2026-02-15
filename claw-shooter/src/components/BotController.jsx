@@ -765,7 +765,7 @@ export const BotController = ({
         userData={{ type: "player" }}
       >
         <BotInfo state={state.state} />
-        <group ref={character}>
+        <group ref={character} scale={[1.5, 1.5, 1.5]}>
           <CharacterPlayer
             animation={animation}
             character={state.getState("character")}

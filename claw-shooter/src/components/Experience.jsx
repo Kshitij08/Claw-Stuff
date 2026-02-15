@@ -23,7 +23,6 @@ import {
   WEAPON_TYPES,
   PLAYER_COUNT,
   MAP_BOUNDS,
-  MIN_DISTANCE_GUN_FROM_PLAYER_SPAWN,
 } from "../constants/weapons";
 
 const DEFAULT_CHARACTER = "G_1";
@@ -45,9 +44,10 @@ export const Experience = ({ downgradedPerformance = false }) => {
   const hasStartedRef = useRef(false);
   const botsAddedRef = useRef(0);
   const pickupsSpawnedRef = useRef(false);
-  const { weaponPickups, takePickup, addWeaponPickup, spawnWeaponPickups, checkWinCondition, gamePhase } =
+  const { weaponPickups, takePickup, addWeaponPickup, spawnWeaponPickups, checkWinCondition, gamePhase, getOccupiedBotPositionsRef } =
     useGameManager();
   const scene = useThree((s) => s.scene);
+  const botPositionsRef = useRef([]);
 
   useEffect(() => {
     setNetworkBullets(bullets);
@@ -56,6 +56,11 @@ export const Experience = ({ downgradedPerformance = false }) => {
   useEffect(() => {
     setNetworkHits(hits);
   }, [hits]);
+
+  useEffect(() => {
+    getOccupiedBotPositionsRef.current = () => botPositionsRef.current;
+    return () => { getOccupiedBotPositionsRef.current = null; };
+  }, [getOccupiedBotPositionsRef]);
 
   /* Spawn weapon pickups once when gamePhase transitions to "playing" (at gun spawn points) */
   useEffect(() => {
@@ -175,34 +180,8 @@ export const Experience = ({ downgradedPerformance = false }) => {
           ? [...modelSpawns, ...fallback.slice(0, need - modelSpawns.length)]
           : fallback;
 
-    const gunSpawns = collectByName1BasedWorld("gun_spawn_");
-    if (gunSpawns.length === 0) {
-      const gun0 = collectByName0BasedWorld("gun_spawn_");
-      if (gun0.length > 0) {
-        gunSpawnPositionsRef.current = gun0;
-      } else {
-        /* No gun_spawn_ in map: build positions away from player spawns so guns don't sit on bot spawns */
-        const playerSpawns = spawnPositionsRef.current;
-        const minDist = MIN_DISTANCE_GUN_FROM_PLAYER_SPAWN;
-        const out = [];
-        const need = Math.max(PLAYER_COUNT, 20);
-        for (let tries = 0; out.length < need && tries < 200; tries++) {
-          const v = new Vector3(
-            MAP_BOUNDS.minX + Math.random() * (MAP_BOUNDS.maxX - MAP_BOUNDS.minX),
-            0,
-            MAP_BOUNDS.minZ + Math.random() * (MAP_BOUNDS.maxZ - MAP_BOUNDS.minZ)
-          );
-          const tooClose = playerSpawns.some((s) => {
-            const sx = s.x ?? 0, sz = s.z ?? 0;
-            return v.distanceTo(new Vector3(sx, 0, sz)) < minDist;
-          });
-          if (!tooClose) out.push(v.clone());
-        }
-        gunSpawnPositionsRef.current = out.length > 0 ? out : playerSpawns;
-      }
-    } else {
-      gunSpawnPositionsRef.current = gunSpawns;
-    }
+    /* Use the same spawn points as bots for guns (e.g. 17 model spawns); exclude bot-occupied at spawn time in spawnWeaponPickups */
+    gunSpawnPositionsRef.current = spawnPositionsRef.current;
 
     const forMarkers = spawnPositionsRef.current.map((p) =>
       p instanceof Vector3 ? p.clone() : new Vector3(p.x, p.y ?? 0, p.z)
@@ -322,6 +301,9 @@ export const Experience = ({ downgradedPerformance = false }) => {
   /* Only check win condition for bots – the local spectator is not a participant */
   const botPlayers = players.filter((p) => p.state?.isBot?.());
   useFrame(() => {
+    botPositionsRef.current = players
+      .filter((p) => p.state?.isBot?.() && !p.state.dead && !p.state.eliminated && p.state?.pos)
+      .map((p) => p.state.pos);
     if (isHost() && botPlayers.length > 0 && gamePhase === "playing") {
       checkWinCondition(botPlayers);
     }
@@ -333,18 +315,6 @@ export const Experience = ({ downgradedPerformance = false }) => {
   return (
     <>
       <Map />
-      {playerSpawnMarkers.map((pos, i) => (
-        <group key={`spawn-marker-${i}`} position={[pos.x, pos.y, pos.z]} userData={{ spawnMarker: true }}>
-          <mesh raycast={() => null}>
-            <cylinderGeometry args={[0.5, 0.8, 1.2, 8]} />
-            <meshBasicMaterial color="#00ff00" transparent opacity={0.85} />
-          </mesh>
-          <mesh position={[0, 1.5, 0]} raycast={() => null}>
-            <coneGeometry args={[0.4, 0.8, 6]} />
-            <meshBasicMaterial color="#00ff00" transparent opacity={0.9} />
-          </mesh>
-        </group>
-      ))}
       {weaponPickups.map((p) => (
         <WeaponPickup
           key={p.id}

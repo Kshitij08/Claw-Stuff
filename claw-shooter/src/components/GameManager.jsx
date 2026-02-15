@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect } from "react";
 import { Vector3 } from "three";
-import { GUN_TYPES, PLAYER_COUNT, WEAPON_RESPAWN_DELAY, MAP_BOUNDS } from "../constants/weapons";
+import { GUN_TYPES, PLAYER_COUNT, WEAPON_RESPAWN_DELAY, MAP_BOUNDS, MIN_DISTANCE_GUN_FROM_PLAYER_SPAWN } from "../constants/weapons";
 
 const GameManagerContext = createContext(null);
 
@@ -11,6 +11,8 @@ export function GameManagerProvider({ children }) {
   const [finalRanking, setFinalRanking] = useState([]);
   const countdownRef = useRef(null);
   const spawnPositionsRef = useRef([]);
+  /** Set by Experience: () => array of {x,y,z} currently occupied by bots (alive, not dead) */
+  const getOccupiedBotPositionsRef = useRef(null);
 
   const startMatch = useCallback(() => {
     if (gamePhase !== "lobby") return;
@@ -65,7 +67,18 @@ export function GameManagerProvider({ children }) {
   const spawnWeaponPickups = useCallback((spawnPositions) => {
     if (!spawnPositions || spawnPositions.length === 0) return;
     spawnPositionsRef.current = spawnPositions;
-    const positions = [...spawnPositions];
+    const occupied = getOccupiedBotPositionsRef.current?.() ?? [];
+    const minDist = MIN_DISTANCE_GUN_FROM_PLAYER_SPAWN;
+    const positions = spawnPositions.filter((sp) => {
+      const sx = sp.x ?? 0, sz = sp.z ?? 0;
+      const tooClose = occupied.some((o) => {
+        const ox = o?.x ?? 0, oz = o?.z ?? 0;
+        const dx = sx - ox, dz = sz - oz;
+        return Math.sqrt(dx * dx + dz * dz) < minDist;
+      });
+      return !tooClose;
+    });
+    if (positions.length === 0) return;
     shuffle(positions);
     const pickups = [];
     const count = Math.min(PLAYER_COUNT, positions.length);
@@ -144,6 +157,7 @@ export function GameManagerProvider({ children }) {
     checkWinCondition,
     restartRound,
     finalRanking,
+    getOccupiedBotPositionsRef,
   };
 
   return (

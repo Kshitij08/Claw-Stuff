@@ -170,9 +170,11 @@ export const BotController = ({
   onMeleeHit,
   onWeaponPickup,
   onWeaponDrop,
+  onWeaponEmpty,
   downgradedPerformance,
   getSpawnPositions,
   getModelSpawnPositions,
+  getInitialSpawnPosition,
   spawnIndex = 0,
   ...props
 }) => {
@@ -314,15 +316,16 @@ export const BotController = ({
         return false;
       }
       const positions = getSpawnPositions?.() ?? [];
-      if (positions.length < PLAYER_COUNT) {
+      if (positions.length < PLAYER_COUNT && !getInitialSpawnPosition) {
         retryAttempt += 1;
         if (retryAttempt % 5 === 1) {
           console.log("[Bot spawn] waiting for spawns:", { name: state.state.profile?.name, positions: positions.length, need: PLAYER_COUNT });
         }
         return false;
       }
-      const fn = spawnFnRef.current ?? getEmptySpawnPosition;
-      const pos = fn(null) ?? positions[spawnIndex % positions.length];
+      const pos = getInitialSpawnPosition
+        ? getInitialSpawnPosition(spawnIndex)
+        : (spawnFnRef.current ?? getEmptySpawnPosition)(null) ?? positions[spawnIndex % positions.length];
       if (pos) {
         setSpawnPos([pos.x ?? 0, pos.y ?? 0, pos.z ?? 0]);
         setBodyKey((k) => k + 1);
@@ -455,12 +458,14 @@ export const BotController = ({
     let weapon = state.getState("weapon") || WEAPON_TYPES.KNIFE;
     let ammo = state.getState("ammo");
 
-    /* Auto-switch to knife when ammo is depleted */
+    /* Auto-switch to knife when ammo is depleted; host spawns a new pickup of that weapon */
     if (weapon !== WEAPON_TYPES.KNIFE && (ammo == null || ammo <= 0)) {
+      const emptiedWeapon = weapon;
       state.setState("weapon", WEAPON_TYPES.KNIFE);
       state.setState("ammo", null);
       weapon = WEAPON_TYPES.KNIFE;
       ammo = null;
+      if (isHost()) onWeaponEmpty?.(emptiedWeapon);
     }
 
     const hasGun = weapon !== WEAPON_TYPES.KNIFE;

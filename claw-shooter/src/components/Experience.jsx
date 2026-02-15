@@ -23,6 +23,7 @@ import {
   WEAPON_TYPES,
   PLAYER_COUNT,
   MAP_BOUNDS,
+  MIN_SPAWN_SEPARATION,
 } from "../constants/weapons";
 
 const DEFAULT_CHARACTER = "G_1";
@@ -38,6 +39,8 @@ export const Experience = ({ downgradedPerformance = false }) => {
   const spawnPositionsRef = useRef([]);
   const modelSpawnPositionsRef = useRef([]);
   const gunSpawnPositionsRef = useRef([]);
+  /** Spawn positions at least MIN_SPAWN_SEPARATION apart, one per player slot (no overlap) */
+  const spreadSpawnPositionsRef = useRef([]);
   const [playerSpawnMarkers, setPlayerSpawnMarkers] = useState([]);
   const refreshCountRef = useRef(0);
   const botNameIndexRef = useRef(0);
@@ -121,6 +124,10 @@ export const Experience = ({ downgradedPerformance = false }) => {
     addWeaponPickup(weaponType);
   };
 
+  const onWeaponEmpty = (weaponType) => {
+    addWeaponPickup(weaponType);
+  };
+
   /* map.glb: use spawn positions as-is (world space), no offset or remap. */
   const _worldPos = useRef(new Vector3());
   const refreshSpawnPositions = () => {
@@ -179,6 +186,27 @@ export const Experience = ({ downgradedPerformance = false }) => {
         : modelSpawns.length > 0
           ? [...modelSpawns, ...fallback.slice(0, need - modelSpawns.length)]
           : fallback;
+
+    /* Build spread list: each position at least MIN_SPAWN_SEPARATION from others so players never spawn on top of each other */
+    const raw = spawnPositionsRef.current;
+    const spread = [];
+    const toVec3 = (p) => (p instanceof Vector3 ? p : new Vector3(p.x, p.y ?? 0, p.z));
+    for (let i = 0; i < raw.length; i++) {
+      const v = toVec3(raw[i]);
+      const tooClose = spread.some((s) => toVec3(s).distanceTo(v) < MIN_SPAWN_SEPARATION);
+      if (!tooClose) spread.push(v.clone());
+      if (spread.length >= PLAYER_COUNT) break;
+    }
+    while (spread.length < PLAYER_COUNT) {
+      const v = new Vector3(
+        MAP_BOUNDS.minX + Math.random() * (MAP_BOUNDS.maxX - MAP_BOUNDS.minX),
+        0,
+        MAP_BOUNDS.minZ + Math.random() * (MAP_BOUNDS.maxZ - MAP_BOUNDS.minZ)
+      );
+      const tooClose = spread.some((s) => toVec3(s).distanceTo(v) < MIN_SPAWN_SEPARATION);
+      if (!tooClose) spread.push(v);
+    }
+    spreadSpawnPositionsRef.current = spread;
 
     /* Use the same spawn points as bots for guns (e.g. 17 model spawns); exclude bot-occupied at spawn time in spawnWeaponPickups */
     gunSpawnPositionsRef.current = spawnPositionsRef.current;
@@ -312,6 +340,18 @@ export const Experience = ({ downgradedPerformance = false }) => {
   const allBullets = isHost() ? bullets : networkBullets;
   const allHits = isHost() ? hits : networkHits;
 
+  const getInitialSpawnPosition = (index) => {
+    const list = spreadSpawnPositionsRef.current;
+    if (list && list[index] != null) return list[index];
+    /* Fallback when spread list not ready: place by index so no two bots share a spot */
+    const step = Math.max(MIN_SPAWN_SEPARATION * 2, 8);
+    return new Vector3(
+      MAP_BOUNDS.minX + step + (index % 5) * step,
+      0,
+      MAP_BOUNDS.minZ + step + Math.floor(index / 5) * step
+    );
+  };
+
   return (
     <>
       <Map />
@@ -337,9 +377,11 @@ export const Experience = ({ downgradedPerformance = false }) => {
             onMeleeHit={onMeleeHit}
             onWeaponPickup={onWeaponPickup}
             onWeaponDrop={onWeaponDrop}
+            onWeaponEmpty={onWeaponEmpty}
             downgradedPerformance={downgradedPerformance}
             getSpawnPositions={() => spawnPositionsRef.current}
             getModelSpawnPositions={() => modelSpawnPositionsRef.current}
+            getInitialSpawnPosition={getInitialSpawnPosition}
           />
         ))}
       {allBullets.map((bullet) => (

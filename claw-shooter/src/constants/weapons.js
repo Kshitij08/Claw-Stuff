@@ -109,6 +109,9 @@ export const MAP_BOUNDS = {
 /** Min distance (m) between gun pickup spawn and any player spawn so guns don't sit on bot spawns */
 export const MIN_DISTANCE_GUN_FROM_PLAYER_SPAWN = 6;
 
+/** Min distance (m) between any two player spawns so they never spawn on top of each other */
+export const MIN_SPAWN_SEPARATION = 4;
+
 /** Human-readable weapon names for UI */
 export const WEAPON_LABELS = {
   [WEAPON_TYPES.KNIFE]: "Knife",

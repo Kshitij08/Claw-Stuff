@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect } from "react";
 import { Vector3 } from "three";
-import { GUN_TYPES, PLAYER_COUNT, WEAPON_RESPAWN_DELAY, MAP_BOUNDS, MIN_DISTANCE_GUN_FROM_PLAYER_SPAWN } from "../constants/weapons";
+import { GUN_TYPES, PLAYER_COUNT, MAP_BOUNDS, MIN_DISTANCE_GUN_FROM_PLAYER_SPAWN } from "../constants/weapons";
 
 const GameManagerContext = createContext(null);
 
@@ -94,19 +94,6 @@ export function GameManagerProvider({ children }) {
     }
     setWeaponPickups(pickups);
   }, []);
-
-  /* Auto-respawn a new set of weapons once every pickup has been taken */
-  useEffect(() => {
-    if (weaponPickups.length === 0) return;
-    if (!weaponPickups.every((p) => p.taken)) return;
-    if (gamePhase !== "playing") return;
-    const timer = setTimeout(() => {
-      if (spawnPositionsRef.current.length > 0) {
-        spawnWeaponPickups(spawnPositionsRef.current);
-      }
-    }, WEAPON_RESPAWN_DELAY);
-    return () => clearTimeout(timer);
-  }, [weaponPickups, gamePhase, spawnWeaponPickups]);
 
   const checkWinCondition = useCallback((players) => {
     if (gamePhase !== "playing") return;

@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect } from "react";
 import { Vector3 } from "three";
-import { GUN_TYPES, PLAYER_COUNT, WEAPON_RESPAWN_DELAY } from "../constants/weapons";
+import { GUN_TYPES, PLAYER_COUNT, WEAPON_RESPAWN_DELAY, MAP_BOUNDS } from "../constants/weapons";
 
 const GameManagerContext = createContext(null);
 
@@ -34,6 +34,32 @@ export function GameManagerProvider({ children }) {
     setWeaponPickups((prev) =>
       prev.map((p) => (p.id === pickupId ? { ...p, taken: true } : p))
     );
+  }, []);
+
+  /** Spawn a single weapon pickup at a random position (e.g. dropped on bot death). */
+  const addWeaponPickup = useCallback((weaponType) => {
+    const positions = spawnPositionsRef.current;
+    let position;
+    if (positions && positions.length > 0) {
+      const pos = positions[Math.floor(Math.random() * positions.length)];
+      position =
+        pos instanceof Vector3 ? pos : new Vector3(pos.x, pos.y ?? 0, pos.z);
+    } else {
+      position = new Vector3(
+        MAP_BOUNDS.minX + Math.random() * (MAP_BOUNDS.maxX - MAP_BOUNDS.minX),
+        0,
+        MAP_BOUNDS.minZ + Math.random() * (MAP_BOUNDS.maxZ - MAP_BOUNDS.minZ)
+      );
+    }
+    setWeaponPickups((prev) => [
+      ...prev,
+      {
+        id: `drop-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        weaponType,
+        position,
+        taken: false,
+      },
+    ]);
   }, []);
 
   const spawnWeaponPickups = useCallback((spawnPositions) => {
@@ -113,6 +139,7 @@ export function GameManagerProvider({ children }) {
     weaponPickups,
     setWeaponPickups,
     takePickup,
+    addWeaponPickup,
     spawnWeaponPickups,
     checkWinCondition,
     restartRound,

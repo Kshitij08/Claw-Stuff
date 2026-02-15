@@ -5,33 +5,41 @@
 
 import React, { useEffect, useMemo, useRef } from "react";
 import { useGLTF, useAnimations } from "@react-three/drei";
+import { LoopOnce } from "three";
 import { SkeletonUtils } from "three-stdlib";
 
-/** Load from app root (same folder as index.html). Put G_1.glb in claw-shooter/public/ so it is copied to public/claw-shooter/ on build. */
-const MODEL_PATH = `${import.meta.env.BASE_URL}G_1.glb`;
+const BASE = import.meta.env.BASE_URL;
+/** Resolve model path from character name (e.g. G_1, G_2, … G_10). */
+function getModelPath(character) {
+  const name = character && /^G_\d+$/.test(character) ? character : "G_1";
+  return `${BASE}${name}.glb`;
+}
 
 /**
- * G_1.glb contains: Idle, Run, Run_Shoot.
- * Idle_Shoot uses Run_Shoot; Death = character hidden (no animation).
+ * G_1.glb animations → game state.
+ * (From G_1.glb: Death, Idle, Idle_Shoot, Run, Run_Shoot.)
+ * Death: play once and clamp.
  */
 const ANIMATION_MAP = {
   Idle: ["Idle"],
   Run: ["Run"],
-  Idle_Shoot: ["Run_Shoot"],
+  Idle_Shoot: ["Idle_Shoot", "Idle_Shoot ", "Run_Shoot"],
   Run_Shoot: ["Run_Shoot"],
-  Death: [],
+  Death: ["Death", "death"],
 };
 
 /**
  * G_1.glb gun node names → our weapon type.
- * (From G_1.glb: root weapon nodes are Knife, Pistol, SMG_G, Shotgun, Rifle_00; rest are internals.)
+ * (Updated model: Knife, Pistol, Smg, Shotgun, Rifle; older had SMG_G, Rifle_00.)
  * Only the gun matching current weapon is visible; others are hidden.
  */
 const GUN_NAME_TO_WEAPON = {
   Knife: "knife",
   Pistol: "pistol",
+  Smg: "smg",
   SMG_G: "smg",
   Shotgun: "shotgun",
+  Rifle: "assault_rifle",
   Rifle_00: "assault_rifle",
 };
 
@@ -63,7 +71,8 @@ export function CharacterPlayer({
   ...props
 }) {
   const group = useRef();
-  const { scene, animations } = useGLTF(MODEL_PATH);
+  const modelPath = getModelPath(character);
+  const { scene, animations } = useGLTF(modelPath);
 
   const clone = useMemo(() => SkeletonUtils.clone(scene), [scene]);
   const { actions } = useAnimations(animations, group);
@@ -74,21 +83,27 @@ export function CharacterPlayer({
   }, [clone, weapon]);
 
   useEffect(() => {
-    if (animation === "Death") return; // Death = invisible, no animation
     const action = findAction(actions, animation);
     if (action) {
+      if (animation === "Death") {
+        action.setLoop(LoopOnce, 1);
+        action.clampWhenFinished = true;
+      }
       action.reset().fadeIn(0.2).play();
       return () => action.fadeOut(0.2);
     }
+    // No matching action (e.g. Death clip missing in model): hide character when dead
   }, [animation, actions]);
 
   const isDead = animation === "Death";
+  const hasDeathAction = !!findAction(actions, "Death");
+  const hideWhenDead = isDead && !hasDeathAction;
 
   return (
-    <group ref={group} {...props} dispose={null} visible={!isDead}>
+    <group ref={group} {...props} dispose={null} visible={!hideWhenDead}>
       <primitive object={clone} />
     </group>
   );
 }
 
-useGLTF.preload(MODEL_PATH);
+[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].forEach((i) => useGLTF.preload(getModelPath(`G_${i}`)));

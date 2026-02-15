@@ -11,6 +11,7 @@ import {
   LIVES_PER_BOT,
   HEALTH_PER_LIFE,
   MAP_BOUNDS,
+  PLAYER_COUNT,
 } from "../constants/weapons";
 import { useGameManager } from "./GameManager";
 
@@ -20,6 +21,10 @@ const MELEE_RANGE = 1.8;
 const KNIFE_RUSH_DECISION_RADIUS = 14;
 const RESPAWN_DELAY = 3000;
 const OCCUPIED_RADIUS = 3;
+/** Min distance (m) from death position when choosing respawn so we never respawn on the spot */
+const MIN_RESPAWN_DISTANCE = 8;
+/** Off-screen position so bots are never visible at origin before spawn */
+const OFFSCREEN_POS = { x: 1e5, y: -1e4, z: 1e5 };
 
 // Stuck detection & recovery
 const STUCK_CHECK_INTERVAL = 300; // ms between checks
@@ -164,8 +169,10 @@ export const BotController = ({
   onKilled,
   onMeleeHit,
   onWeaponPickup,
+  onWeaponDrop,
   downgradedPerformance,
   getSpawnPositions,
+  getModelSpawnPositions,
   spawnIndex = 0,
   ...props
 }) => {
@@ -177,6 +184,8 @@ export const BotController = ({
   const players = usePlayersList(true);
   const { weaponPickups, gamePhase } = useGameManager();
   const [animation, setAnimation] = useState("Idle");
+  const [spawnPos, setSpawnPos] = useState([OFFSCREEN_POS.x, OFFSCREEN_POS.y, OFFSCREEN_POS.z]);
+  const [bodyKey, setBodyKey] = useState(0);
   const scene = useThree((s) => s.scene);
   const bot = state.bot;
 
@@ -197,12 +206,32 @@ export const BotController = ({
 
   /* Ref so setTimeout always uses the latest spawn function */
   const spawnFnRef = useRef(null);
+  /* Track if we've placed initial spawn so we only enable body after placement (avoid 0,0,0) */
+  const hasPlacedInitialSpawnRef = useRef(false);
 
-  /* ── Find a random spawn point, excluding the supplied position ── */
+  /* ── Find a random spawn point, excluding the supplied position. useModelOnly = true for respawn (arena spawns only). ── */
   const getEmptySpawnPosition = useCallback(
-    (excludePos = null) => {
-      const positions = getSpawnPositions?.() ?? [];
-      if (!positions.length) return null;
+    (excludePos = null, useModelOnly = false) => {
+      const randomInBounds = (minDistFrom = null) => {
+        for (let i = 0; i < 20; i++) {
+          const pt = {
+            x: MAP_BOUNDS.minX + Math.random() * (MAP_BOUNDS.maxX - MAP_BOUNDS.minX),
+            y: 0,
+            z: MAP_BOUNDS.minZ + Math.random() * (MAP_BOUNDS.maxZ - MAP_BOUNDS.minZ),
+          };
+          if (!minDistFrom || vec3(pt).distanceTo(vec3(minDistFrom)) >= MIN_RESPAWN_DISTANCE)
+            return pt;
+        }
+        return {
+          x: MAP_BOUNDS.minX + Math.random() * (MAP_BOUNDS.maxX - MAP_BOUNDS.minX),
+          y: 0,
+          z: MAP_BOUNDS.minZ + Math.random() * (MAP_BOUNDS.maxZ - MAP_BOUNDS.minZ),
+        };
+      };
+      const positions = useModelOnly
+        ? (getModelSpawnPositions?.() ?? [])
+        : (getSpawnPositions?.() ?? []);
+      if (!positions.length) return randomInBounds(excludePos);
 
       /* Collect positions occupied by other alive bots */
       const occupied = [];
@@ -224,9 +253,12 @@ export const BotController = ({
         occupied.push({ x: excludePos.x, y: excludePos.y, z: excludePos.z });
       }
 
+      const minDistFromExclude = excludePos ? MIN_RESPAWN_DISTANCE : OCCUPIED_RADIUS;
       const isFree = (sp) => {
         const v = vec3({ x: sp.x ?? 0, y: sp.y ?? 0, z: sp.z ?? 0 });
-        return !occupied.some((o) => v.distanceTo(vec3(o)) < OCCUPIED_RADIUS);
+        if (occupied.some((o) => v.distanceTo(vec3(o)) < OCCUPIED_RADIUS)) return false;
+        if (excludePos && v.distanceTo(vec3(excludePos)) < minDistFromExclude) return false;
+        return true;
       };
 
       const emptySpawns = positions.filter(isFree);
@@ -234,38 +266,20 @@ export const BotController = ({
         return emptySpawns[Math.floor(Math.random() * emptySpawns.length)];
       }
 
-      /* Fallback: any spawn NOT at/near the excluded position */
+      /* Fallback: any spawn at least MIN_RESPAWN_DISTANCE from death */
       if (excludePos) {
         const fallback = positions.filter((sp) => {
           const v = vec3({ x: sp.x ?? 0, y: sp.y ?? 0, z: sp.z ?? 0 });
-          return v.distanceTo(vec3(excludePos)) >= OCCUPIED_RADIUS;
+          return v.distanceTo(vec3(excludePos)) >= minDistFromExclude;
         });
         if (fallback.length) {
           return fallback[Math.floor(Math.random() * fallback.length)];
         }
-        /* Even with no fallback, never return a position at death spot */
-        const away = positions.filter((sp) => {
-          const v = vec3({ x: sp.x ?? 0, y: sp.y ?? 0, z: sp.z ?? 0 });
-          return v.distanceTo(vec3(excludePos)) > 0.5;
-        });
-        if (away.length) {
-          return away[Math.floor(Math.random() * away.length)];
-        }
-      }
-
-      /* Last resort: random spawn, but never use excludePos if we have it */
-      if (excludePos) {
-        const notDeath = positions.filter((sp) => {
-          const v = vec3({ x: sp.x ?? 0, y: sp.y ?? 0, z: sp.z ?? 0 });
-          return v.distanceTo(vec3(excludePos)) >= OCCUPIED_RADIUS;
-        });
-        if (notDeath.length) {
-          return notDeath[Math.floor(Math.random() * notDeath.length)];
-        }
+        return randomInBounds(excludePos);
       }
       return positions[Math.floor(Math.random() * positions.length)];
     },
-    [getSpawnPositions, players, state.id]
+    [getSpawnPositions, getModelSpawnPositions, players, state.id]
   );
 
   /* Keep ref in sync so setTimeout closures always use the latest version */
@@ -274,7 +288,10 @@ export const BotController = ({
   }, [getEmptySpawnPosition]);
 
   const spawnAtPosition = useCallback((pos) => {
-    if (!pos || !rigidbody.current) return;
+    if (!pos || !rigidbody.current) {
+      if (!pos && rigidbody.current) console.warn("[Bot spawn] spawnAtPosition called with null/undefined pos");
+      return;
+    }
     rigidbody.current.setTranslation({
       x: pos.x ?? 0,
       y: pos.y ?? 0,
@@ -283,16 +300,52 @@ export const BotController = ({
     rigidbody.current.setLinvel({ x: 0, y: 0, z: 0 });
   }, []);
 
-  /* ── Initial spawn ── */
+  /* ── Initial spawn: only when spawn positions are available; retry until then ── */
   useEffect(() => {
     if (!isHost()) return;
-    const t = setTimeout(() => {
-      const positions = getSpawnPositions?.() ?? [];
-      if (positions.length && rigidbody.current) {
-        spawnAtPosition(positions[spawnIndex % positions.length]);
+
+    let retryId = null;
+
+    let retryAttempt = 0;
+    const trySpawn = () => {
+      if (!rigidbody.current) {
+        retryAttempt += 1;
+        if (retryAttempt % 5 === 1) console.log("[Bot spawn] no rigidbody yet:", state.state.profile?.name);
+        return false;
       }
-    }, 100);
-    return () => clearTimeout(t);
+      const positions = getSpawnPositions?.() ?? [];
+      if (positions.length < PLAYER_COUNT) {
+        retryAttempt += 1;
+        if (retryAttempt % 5 === 1) {
+          console.log("[Bot spawn] waiting for spawns:", { name: state.state.profile?.name, positions: positions.length, need: PLAYER_COUNT });
+        }
+        return false;
+      }
+      const fn = spawnFnRef.current ?? getEmptySpawnPosition;
+      const pos = fn(null) ?? positions[spawnIndex % positions.length];
+      if (pos) {
+        setSpawnPos([pos.x ?? 0, pos.y ?? 0, pos.z ?? 0]);
+        setBodyKey((k) => k + 1);
+        hasPlacedInitialSpawnRef.current = true;
+        console.log("[Bot spawn] ok:", state.state.profile?.name, "at", pos.x?.toFixed(1), pos.y?.toFixed(1), pos.z?.toFixed(1));
+      }
+      return true;
+    };
+
+    const schedule = (delay) => {
+      return setTimeout(() => {
+        if (!trySpawn()) {
+          retryId = schedule(400);
+        }
+      }, delay);
+    };
+
+    const t1 = schedule(100);
+
+    return () => {
+      clearTimeout(t1);
+      if (retryId) clearTimeout(retryId);
+    };
   }, []);
 
   /* ── Death → respawn after delay at a random empty spawn ── */
@@ -307,21 +360,60 @@ export const BotController = ({
       } catch (_) {}
     }
 
-    /* Capture death position BEFORE disabling physics */
+    /* Capture death position and weapon as plain values (Rapier may reuse translation object) */
     const t = rigidbody.current?.translation();
-    const deathPos = t ? { x: t.x, y: t.y, z: t.z } : null;
+    const deathPos = t
+      ? { x: Number(t.x), y: Number(t.y), z: Number(t.z) }
+      : null;
+    const weaponOnDeath = state.getState("weapon");
     if (rigidbody.current) rigidbody.current.setEnabled(false);
 
     const timer = setTimeout(() => {
       if (state.state.eliminated) return;
 
-      /* Use the ref to always get the latest spawn function; exclude death position so we never respawn there */
+      /* Respawn: prefer arena model spawn points; fall back to any spawn, then random in MAP_BOUNDS */
       const fn = spawnFnRef.current ?? getEmptySpawnPosition;
-      const pos = fn(deathPos) ?? fn(null);
+      let pos = deathPos != null ? fn(deathPos, true) : fn(null, true);
+      if (!pos) pos = deathPos != null ? fn(deathPos, false) : fn(null, false);
+      if (!pos) {
+        pos = {
+          x: MAP_BOUNDS.minX + Math.random() * (MAP_BOUNDS.maxX - MAP_BOUNDS.minX),
+          y: 0,
+          z: MAP_BOUNDS.minZ + Math.random() * (MAP_BOUNDS.maxZ - MAP_BOUNDS.minZ),
+        };
+      }
+      let p = { x: pos.x ?? 0, y: pos.y ?? 0, z: pos.z ?? 0 };
 
-      /* Re-enable body FIRST so setTranslation is applied (Rapier ignores it when disabled) */
-      if (rigidbody.current) rigidbody.current.setEnabled(true);
-      if (pos) spawnAtPosition(pos);
+      /* Final safety: never respawn at or near death position (handles shared refs or engine quirks) */
+      if (deathPos != null) {
+        const dist = vec3(p).distanceTo(vec3(deathPos));
+        if (dist < MIN_RESPAWN_DISTANCE) {
+          for (let i = 0; i < 15; i++) {
+            const q = {
+              x: MAP_BOUNDS.minX + Math.random() * (MAP_BOUNDS.maxX - MAP_BOUNDS.minX),
+              y: 0,
+              z: MAP_BOUNDS.minZ + Math.random() * (MAP_BOUNDS.maxZ - MAP_BOUNDS.minZ),
+            };
+            if (vec3(q).distanceTo(vec3(deathPos)) >= MIN_RESPAWN_DISTANCE) {
+              p = q;
+              break;
+            }
+          }
+        }
+      }
+
+      /* Remount RigidBody at new position via key change so Rapier creates a fresh body at p */
+      setSpawnPos([p.x, p.y, p.z]);
+      setBodyKey((k) => k + 1);
+
+      /* Drop the weapon the bot had as a pickup elsewhere (if it was a gun) */
+      if (
+        weaponOnDeath &&
+        weaponOnDeath !== WEAPON_TYPES.KNIFE &&
+        onWeaponDrop
+      ) {
+        onWeaponDrop(weaponOnDeath);
+      }
 
       state.setState("dead", false);
       state.setState("health", HEALTH_PER_LIFE);
@@ -623,7 +715,9 @@ export const BotController = ({
   return (
     <group ref={group} {...props}>
       <RigidBody
+        key={bodyKey}
         ref={rigidbody}
+        position={spawnPos}
         colliders={false}
         linearDamping={12}
         lockRotations

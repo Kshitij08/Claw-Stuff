@@ -41,6 +41,12 @@ while (offset < totalLength) {
       console.log(`${i}: ${name}`);
     });
 
+    const spawnRelated = (json.nodes || [])
+      .map((n) => n.name)
+      .filter((name) => name && (String(name).includes("spawn") || String(name).includes("Spawn")));
+    console.log("\n=== Spawn-related node names ===");
+    console.log(spawnRelated.length ? spawnRelated.sort().join("\n") : "(none)");
+
     const meshNames = new Set();
     const meshes = json.meshes || [];
     meshes.forEach((m, i) => {

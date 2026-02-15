@@ -22,10 +22,13 @@ import {
   HEALTH_PER_LIFE,
   WEAPON_TYPES,
   PLAYER_COUNT,
+  MAP_BOUNDS,
+  MIN_DISTANCE_GUN_FROM_PLAYER_SPAWN,
 } from "../constants/weapons";
 
-/* All players use the G_1.glb model */
 const DEFAULT_CHARACTER = "G_1";
+/** Bot skins: G_1.glb through G_10.glb */
+const BOT_CHARACTERS = Array.from({ length: 10 }, (_, i) => `G_${i + 1}`);
 
 export const Experience = ({ downgradedPerformance = false }) => {
   const [players, setPlayers] = useState([]);
@@ -34,11 +37,15 @@ export const Experience = ({ downgradedPerformance = false }) => {
   const [hits, setHits] = useState([]);
   const [networkHits, setNetworkHits] = useMultiplayerState("hits", []);
   const spawnPositionsRef = useRef([]);
+  const modelSpawnPositionsRef = useRef([]);
+  const gunSpawnPositionsRef = useRef([]);
+  const [playerSpawnMarkers, setPlayerSpawnMarkers] = useState([]);
+  const refreshCountRef = useRef(0);
   const botNameIndexRef = useRef(0);
   const hasStartedRef = useRef(false);
   const botsAddedRef = useRef(0);
   const pickupsSpawnedRef = useRef(false);
-  const { weaponPickups, takePickup, spawnWeaponPickups, checkWinCondition, gamePhase } =
+  const { weaponPickups, takePickup, addWeaponPickup, spawnWeaponPickups, checkWinCondition, gamePhase } =
     useGameManager();
   const scene = useThree((s) => s.scene);
 
@@ -50,12 +57,14 @@ export const Experience = ({ downgradedPerformance = false }) => {
     setNetworkHits(hits);
   }, [hits]);
 
-  /* Spawn weapon pickups once when gamePhase transitions to "playing" */
+  /* Spawn weapon pickups once when gamePhase transitions to "playing" (at gun spawn points) */
   useEffect(() => {
     if (gamePhase === "playing" && !pickupsSpawnedRef.current && isHost()) {
       pickupsSpawnedRef.current = true;
-      if (spawnPositionsRef.current.length > 0) {
-        spawnWeaponPickups(spawnPositionsRef.current);
+      const gunSpawns = gunSpawnPositionsRef.current;
+      const positions = gunSpawns.length > 0 ? gunSpawns : spawnPositionsRef.current;
+      if (positions.length > 0) {
+        spawnWeaponPickups(positions);
       }
     }
   }, [gamePhase]);
@@ -103,25 +112,125 @@ export const Experience = ({ downgradedPerformance = false }) => {
     takePickup(pickupId);
   };
 
-  useEffect(() => {
-    const spawns = [];
-    for (let i = 0; i < 1000; i++) {
-      const obj = scene.getObjectByName(`spawn_${i}`);
-      if (obj) spawns.push(new Vector3().copy(obj.position));
-      else break;
-    }
-    if (spawns.length === 0) {
-      for (let i = 0; i < 20; i++) {
-        spawns.push(
-          new Vector3(
-            (Math.random() - 0.5) * 80,
-            0,
-            (Math.random() - 0.5) * 80
-          )
-        );
+  const onWeaponDrop = (weaponType) => {
+    addWeaponPickup(weaponType);
+  };
+
+  /* map.glb: use spawn positions as-is (world space), no offset or remap. */
+  const _worldPos = useRef(new Vector3());
+  const refreshSpawnPositions = () => {
+    const collectByName1BasedWorld = (prefix, max = 1000) => {
+      const out = [];
+      const w = _worldPos.current;
+      for (let i = 1; i <= max; i++) {
+        const obj = scene.getObjectByName(`${prefix}${i}`);
+        if (obj) {
+          obj.getWorldPosition(w);
+          out.push(w.clone());
+        } else {
+          if (i === 1) {
+            const obj0 = scene.getObjectByName(`${prefix}0`);
+            if (obj0) {
+              obj0.getWorldPosition(w);
+              out.push(w.clone());
+            }
+          }
+          break;
+        }
       }
+      return out;
+    };
+    const collectByName0BasedWorld = (prefix, max = 1000) => {
+      const out = [];
+      const w = _worldPos.current;
+      for (let i = 0; i < max; i++) {
+        const obj = scene.getObjectByName(`${prefix}${i}`);
+        if (obj) {
+          obj.getWorldPosition(w);
+          out.push(w.clone());
+        } else break;
+      }
+      return out;
+    };
+
+    let modelSpawns = collectByName1BasedWorld("player_spawn_");
+    if (modelSpawns.length === 0) modelSpawns = collectByName0BasedWorld("spawn_");
+    modelSpawnPositionsRef.current = modelSpawns;
+
+    const need = Math.max(PLAYER_COUNT, 20);
+    const fallback = [];
+    for (let i = 0; i < need; i++) {
+      fallback.push(
+        new Vector3(
+          MAP_BOUNDS.minX + Math.random() * (MAP_BOUNDS.maxX - MAP_BOUNDS.minX),
+          0,
+          MAP_BOUNDS.minZ + Math.random() * (MAP_BOUNDS.maxZ - MAP_BOUNDS.minZ)
+        )
+      );
     }
-    spawnPositionsRef.current = spawns;
+    spawnPositionsRef.current =
+      modelSpawns.length >= PLAYER_COUNT
+        ? modelSpawns
+        : modelSpawns.length > 0
+          ? [...modelSpawns, ...fallback.slice(0, need - modelSpawns.length)]
+          : fallback;
+
+    const gunSpawns = collectByName1BasedWorld("gun_spawn_");
+    if (gunSpawns.length === 0) {
+      const gun0 = collectByName0BasedWorld("gun_spawn_");
+      if (gun0.length > 0) {
+        gunSpawnPositionsRef.current = gun0;
+      } else {
+        /* No gun_spawn_ in map: build positions away from player spawns so guns don't sit on bot spawns */
+        const playerSpawns = spawnPositionsRef.current;
+        const minDist = MIN_DISTANCE_GUN_FROM_PLAYER_SPAWN;
+        const out = [];
+        const need = Math.max(PLAYER_COUNT, 20);
+        for (let tries = 0; out.length < need && tries < 200; tries++) {
+          const v = new Vector3(
+            MAP_BOUNDS.minX + Math.random() * (MAP_BOUNDS.maxX - MAP_BOUNDS.minX),
+            0,
+            MAP_BOUNDS.minZ + Math.random() * (MAP_BOUNDS.maxZ - MAP_BOUNDS.minZ)
+          );
+          const tooClose = playerSpawns.some((s) => {
+            const sx = s.x ?? 0, sz = s.z ?? 0;
+            return v.distanceTo(new Vector3(sx, 0, sz)) < minDist;
+          });
+          if (!tooClose) out.push(v.clone());
+        }
+        gunSpawnPositionsRef.current = out.length > 0 ? out : playerSpawns;
+      }
+    } else {
+      gunSpawnPositionsRef.current = gunSpawns;
+    }
+
+    const forMarkers = spawnPositionsRef.current.map((p) =>
+      p instanceof Vector3 ? p.clone() : new Vector3(p.x, p.y ?? 0, p.z)
+    );
+    setPlayerSpawnMarkers(forMarkers);
+    refreshCountRef.current += 1;
+    if (refreshCountRef.current <= 3 || modelSpawns.length > 0) {
+      console.log("[Spawn] refresh:", {
+        player: spawnPositionsRef.current.length,
+        model: modelSpawns.length,
+        gun: gunSpawnPositionsRef.current.length,
+      });
+    }
+  };
+
+  useEffect(() => {
+    refreshSpawnPositions();
+    /* Retry so we catch arena when it loads (useGLTF is async) */
+    const t1 = setTimeout(refreshSpawnPositions, 200);
+    const t2 = setTimeout(refreshSpawnPositions, 500);
+    const t3 = setTimeout(refreshSpawnPositions, 1200);
+    const t4 = setTimeout(refreshSpawnPositions, 2500);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+      clearTimeout(t4);
+    };
   }, [scene]);
 
   useEffect(() => {
@@ -150,8 +259,14 @@ export const Experience = ({ downgradedPerformance = false }) => {
         state.setState("eliminated", false);
         state.setState("weapon", WEAPON_TYPES.KNIFE);
         state.setState("ammo", null);
-        if (state.getState("character") === undefined)
-          state.setState("character", DEFAULT_CHARACTER);
+        if (state.getState("character") === undefined) {
+          state.setState(
+            "character",
+            state.isBot()
+              ? BOT_CHARACTERS[Math.floor(Math.random() * BOT_CHARACTERS.length)]
+              : DEFAULT_CHARACTER
+          );
+        }
         if (state.getState("personality") === undefined)
           state.setState(
             "personality",
@@ -196,6 +311,14 @@ export const Experience = ({ downgradedPerformance = false }) => {
     };
   }, []);
 
+  const frameCountRef = useRef(0);
+  useFrame(() => {
+    frameCountRef.current += 1;
+    if (frameCountRef.current <= 300 && frameCountRef.current % 15 === 0) {
+      refreshSpawnPositions();
+    }
+  });
+
   /* Only check win condition for bots – the local spectator is not a participant */
   const botPlayers = players.filter((p) => p.state?.isBot?.());
   useFrame(() => {
@@ -210,6 +333,18 @@ export const Experience = ({ downgradedPerformance = false }) => {
   return (
     <>
       <Map />
+      {playerSpawnMarkers.map((pos, i) => (
+        <group key={`spawn-marker-${i}`} position={[pos.x, pos.y, pos.z]} userData={{ spawnMarker: true }}>
+          <mesh raycast={() => null}>
+            <cylinderGeometry args={[0.5, 0.8, 1.2, 8]} />
+            <meshBasicMaterial color="#00ff00" transparent opacity={0.85} />
+          </mesh>
+          <mesh position={[0, 1.5, 0]} raycast={() => null}>
+            <coneGeometry args={[0.4, 0.8, 6]} />
+            <meshBasicMaterial color="#00ff00" transparent opacity={0.9} />
+          </mesh>
+        </group>
+      ))}
       {weaponPickups.map((p) => (
         <WeaponPickup
           key={p.id}
@@ -231,8 +366,10 @@ export const Experience = ({ downgradedPerformance = false }) => {
             onKilled={onKilled}
             onMeleeHit={onMeleeHit}
             onWeaponPickup={onWeaponPickup}
+            onWeaponDrop={onWeaponDrop}
             downgradedPerformance={downgradedPerformance}
             getSpawnPositions={() => spawnPositionsRef.current}
+            getModelSpawnPositions={() => modelSpawnPositionsRef.current}
           />
         ))}
       {allBullets.map((bullet) => (

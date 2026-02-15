@@ -97,3 +97,11 @@ export const PERSONALITIES = [
 export const LIVES_PER_BOT = 3;
 export const HEALTH_PER_LIFE = 100;
 export const PLAYER_COUNT = 4;
+
+/** Play area bounds so bots don't wander off the map (x and z; y is unchanged) */
+export const MAP_BOUNDS = {
+  minX: -45,
+  maxX: 45,
+  minZ: -45,
+  maxZ: 45,
+};

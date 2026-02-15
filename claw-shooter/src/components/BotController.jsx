@@ -10,6 +10,7 @@ import {
   KNIFE,
   LIVES_PER_BOT,
   HEALTH_PER_LIFE,
+  MAP_BOUNDS,
 } from "../constants/weapons";
 import { useGameManager } from "./GameManager";
 
@@ -138,26 +139,27 @@ export const BotController = ({
   const bot = state.bot;
 
   /**
-   * Find a random spawn point that is not occupied by any alive player.
+   * Find a random spawn point that is not occupied by any other alive bot.
    * Falls back to any random spawn if all are occupied.
    */
   const getEmptySpawnPosition = useCallback(() => {
     const positions = getSpawnPositions?.() ?? [];
     if (!positions.length) return null;
 
-    // Collect positions of alive players
-    const alivePositions = [];
+    // Only consider other bots (not the human spectator) when checking occupancy
+    const aliveBotPositions = [];
     for (const p of players) {
+      if (!p.state?.isBot?.()) continue;
       if (!p.state?.pos) continue;
       if (p.state.eliminated || (p.state.lives !== undefined && p.state.lives <= 0)) continue;
+      if (p.state.dead) continue;
       if (p.id === state.id) continue; // skip self
-      alivePositions.push(p.state.pos);
+      aliveBotPositions.push(p.state.pos);
     }
 
-    // Find unoccupied spawn points
     const emptySpawns = positions.filter((sp) => {
       const spVec = vec3({ x: sp.x ?? 0, y: sp.y ?? 0, z: sp.z ?? 0 });
-      return !alivePositions.some((ap) => spVec.distanceTo(vec3(ap)) < OCCUPIED_RADIUS);
+      return !aliveBotPositions.some((ap) => spVec.distanceTo(vec3(ap)) < OCCUPIED_RADIUS);
     });
 
     const pool = emptySpawns.length > 0 ? emptySpawns : positions;
@@ -370,11 +372,20 @@ export const BotController = ({
       rigidbody.current.applyImpulse(impulse);
     }
 
+    /* Keep bot inside map bounds */
+    let pos = rigidbody.current.translation();
+    const x = Math.max(MAP_BOUNDS.minX, Math.min(MAP_BOUNDS.maxX, pos.x));
+    const z = Math.max(MAP_BOUNDS.minZ, Math.min(MAP_BOUNDS.maxZ, pos.z));
+    if (x !== pos.x || z !== pos.z) {
+      rigidbody.current.setTranslation({ x, y: pos.y, z });
+      pos = rigidbody.current.translation();
+    }
+
     if (isHost()) {
-      state.setState("pos", rigidbody.current.translation());
+      state.setState("pos", pos);
     } else {
-      const pos = state.getState("pos");
-      if (pos) rigidbody.current.setTranslation(pos);
+      const netPos = state.getState("pos");
+      if (netPos) rigidbody.current.setTranslation(netPos);
     }
   });
 

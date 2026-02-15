@@ -11,12 +11,18 @@ export function SpectatorCamera() {
   const controlsRef = useRef();
   const { camera } = useThree();
 
-  useEffect(() => {
+  const applyCameraOverMap = () => {
     if (!controlsRef.current) return;
     controlsRef.current.target.copy(MAP_CENTER);
     camera.position.set(0, 40, 25);
     camera.lookAt(MAP_CENTER);
     controlsRef.current.update();
+  };
+
+  useEffect(() => {
+    applyCameraOverMap();
+    const t = setTimeout(applyCameraOverMap, 800);
+    return () => clearTimeout(t);
   }, [camera]);
 
   useEffect(() => {

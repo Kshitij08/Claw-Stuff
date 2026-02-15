@@ -1,5 +1,5 @@
 import { Environment } from "@react-three/drei";
-import { Map } from "./Map";
+import { MapWithFallback } from "./Map";
 import { useEffect, useState, useRef } from "react";
 import {
   insertCoin,
@@ -128,7 +128,7 @@ export const Experience = ({ downgradedPerformance = false }) => {
     addWeaponPickup(weaponType);
   };
 
-  /* map.glb: use spawn positions as-is (world space), no offset or remap. */
+  /* map1.glb: use spawn positions as-is (world space), no offset or remap. */
   const _worldPos = useRef(new Vector3());
   const refreshSpawnPositions = () => {
     const collectByName1BasedWorld = (prefix, max = 1000) => {
@@ -354,7 +354,7 @@ export const Experience = ({ downgradedPerformance = false }) => {
 
   return (
     <>
-      <Map />
+      <MapWithFallback />
       {weaponPickups.map((p) => (
         <WeaponPickup
           key={p.id}

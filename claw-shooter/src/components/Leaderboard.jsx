@@ -1,5 +1,39 @@
+/**
+ * Leaderboard overlay – refactored to use server state.
+ *
+ * Shows lobby, countdown, camera hints during play, and end screen.
+ */
+
 import { createPortal } from "react-dom";
+import { useState, useEffect } from "react";
 import { useGameManager } from "./GameManager";
+
+function CountdownOverlay({ playerCount, startsAt }) {
+  const [secondsLeft, setSecondsLeft] = useState(null);
+
+  useEffect(() => {
+    if (!startsAt) return;
+    const update = () => {
+      const remaining = Math.max(0, Math.ceil((startsAt - Date.now()) / 1000));
+      setSecondsLeft(remaining);
+    };
+    update();
+    const interval = setInterval(update, 500);
+    return () => clearInterval(interval);
+  }, [startsAt]);
+
+  return (
+    <div className="fixed inset-0 z-20 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm">
+      <h1 className="text-3xl font-bold text-white mb-4">Claw Shooter</h1>
+      {secondsLeft != null && secondsLeft > 0 ? (
+        <p className="text-white text-4xl font-black animate-pulse">{secondsLeft}s</p>
+      ) : (
+        <p className="text-white text-xl animate-pulse">Starting...</p>
+      )}
+      <p className="text-white/50 text-sm mt-2">{playerCount} agents ready</p>
+    </div>
+  );
+}
 
 function formatSurvival(seconds) {
   const sec = seconds ?? 0;
@@ -7,7 +41,7 @@ function formatSurvival(seconds) {
 }
 
 export const Leaderboard = () => {
-  const { gamePhase, finalRanking, countdown, startMatch } = useGameManager();
+  const { gamePhase, matchEnd, matchStatus } = useGameManager();
 
   const gameContainer = typeof document !== "undefined" ? document.getElementById("game-view-center") : null;
 
@@ -27,20 +61,22 @@ export const Leaderboard = () => {
     </button>
   );
 
+  const finalRanking = matchEnd?.finalRanking ?? [];
+
   const gameAreaOverlay =
     gameContainer &&
     createPortal(
       <>
-        {/* Playing: camera hint only — one line, top center */}
+        {/* Playing: camera hint */}
         {gamePhase === "playing" && (
           <div className="absolute top-0 left-0 right-0 z-10 pointer-events-none flex justify-center pt-4">
             <div className="bg-slate-800/95 text-white text-sm md:text-base font-bold rounded-lg px-4 py-2 border-2 border-white shadow-[4px_4px_0_black] text-center whitespace-nowrap">
-              Click bot or their name in leaderboard to follow • Left drag to orbit • Esc = free cam
+              Click agent name in leaderboard to follow &bull; Left drag to orbit &bull; Esc = free cam
             </div>
           </div>
         )}
 
-        {/* End screen — claw-snake theme: winner card + full table */}
+        {/* End screen */}
         {gamePhase === "ended" && finalRanking.length > 0 && (
           <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/80 p-4 overflow-y-auto">
             <div className="bg-slate-800 p-2 border-4 border-white shadow-[10px_10px_0_#facc15] max-w-sm w-full animate-float my-auto max-h-[90%] overflow-y-auto">
@@ -56,7 +92,7 @@ export const Leaderboard = () => {
                 <div className="mb-4">
                   <div className="bg-white p-2 border-2 border-black inline-block">
                     <div className="text-[10px] font-black uppercase text-black">Survival</div>
-                    <div className="text-xl neo-font text-[#d946ef]">{formatSurvival(finalRanking[0]?.survivalTimeSeconds)}</div>
+                    <div className="text-xl neo-font text-[#d946ef]">{formatSurvival(finalRanking[0]?.survivalTime)}</div>
                   </div>
                 </div>
                 <table className="winner-table">
@@ -70,10 +106,10 @@ export const Leaderboard = () => {
                   </thead>
                   <tbody>
                     {finalRanking.map((entry) => (
-                      <tr key={entry.id} className={entry.rank === 1 ? "highlight" : ""}>
+                      <tr key={entry.rank} className={entry.rank === 1 ? "highlight" : ""}>
                         <td>{entry.rank}</td>
                         <td>{entry.name}</td>
-                        <td>{formatSurvival(entry.survivalTimeSeconds)}</td>
+                        <td>{formatSurvival(entry.survivalTime)}</td>
                         <td>{entry.kills}/{entry.deaths}</td>
                       </tr>
                     ))}
@@ -92,27 +128,28 @@ export const Leaderboard = () => {
 
         {(gamePhase === "playing" || (gamePhase === "ended" && finalRanking.length > 0)) && fullscreenButton}
       </>,
-      gameContainer
+      gameContainer,
     );
+
+  const playerCount = matchStatus?.currentMatch?.playerCount ?? 0;
 
   return (
     <>
+      {/* Lobby screen */}
       {gamePhase === "lobby" && (
         <div className="fixed inset-0 z-20 flex flex-col items-center justify-center bg-black/70 backdrop-blur-sm">
-          <h1 className="text-3xl font-bold text-white mb-8">Claw Shooter</h1>
-          <button
-            className="px-10 py-4 bg-green-500 hover:bg-green-400 text-white text-xl font-bold rounded-xl shadow-lg transition transform hover:scale-105"
-            onClick={startMatch}
-          >
-            Start Match
-          </button>
+          <h1 className="text-3xl font-bold text-white mb-4">Claw Shooter</h1>
+          <p className="text-white/70 text-lg mb-2">Waiting for agents to join...</p>
+          <p className="text-white/50 text-sm">
+            {playerCount} player{playerCount !== 1 ? "s" : ""} in lobby.
+            Match starts when 2+ agents join.
+          </p>
         </div>
       )}
 
-      {gamePhase === "countdown" && countdown > 0 && (
-        <div className="fixed inset-0 z-30 flex items-center justify-center pointer-events-none">
-          <span className="text-white text-8xl font-black drop-shadow-lg animate-pulse">{countdown}</span>
-        </div>
+      {/* Countdown screen */}
+      {gamePhase === "countdown" && (
+        <CountdownOverlay playerCount={playerCount} startsAt={matchStatus?.currentMatch?.startsAt} />
       )}
 
       {gameAreaOverlay}

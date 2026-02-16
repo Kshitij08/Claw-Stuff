@@ -1,7 +1,13 @@
+/**
+ * SpectatorCamera – refactored to use server state instead of PlayroomKit.
+ *
+ * Free camera (orbit) by default. Click a player name in leaderboard or on
+ * the 3D scene to follow them in third person.
+ */
+
 import { useRef, useEffect } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
-import { usePlayersList } from "playroomkit";
 import { Vector3 } from "three";
 import { useGameManager } from "./GameManager";
 
@@ -9,17 +15,14 @@ const PAN_SPEED = 15;
 const keyState = { forward: false, back: false, left: false, right: false };
 const MAP_CENTER = new Vector3(0, 0, 0);
 
-/** Third-person offset: camera behind and above the bot (world space). */
 const THIRD_PERSON_OFFSET = new Vector3(0, 6, 10);
 const THIRD_PERSON_LOOK_AT_Y = 1.5;
-/** Smoothing factor for follow camera: 1 = instant, lower = smoother (reduces jitter). */
 const FOLLOW_SMOOTH = 12;
 
 export function SpectatorCamera() {
   const controlsRef = useRef();
   const { camera } = useThree();
-  const { selectedBotId, setSelectedBotId } = useGameManager();
-  const players = usePlayersList(true);
+  const { selectedBotId, setSelectedBotId, gameState } = useGameManager();
   const followPosRef = useRef(new Vector3());
   const followTargetRef = useRef(new Vector3());
   const followInitializedRef = useRef(false);
@@ -96,27 +99,31 @@ export function SpectatorCamera() {
     const controls = controlsRef.current;
     if (!controls) return;
 
-    if (selectedBotId) {
+    // Find selected player in server state
+    if (selectedBotId && gameState?.players) {
       if (prevSelectedBotIdRef.current !== selectedBotId) {
         followInitializedRef.current = false;
         userHasRotatedRef.current = false;
         prevSelectedBotIdRef.current = selectedBotId;
       }
-      const bot = players.find((p) => p.id === selectedBotId);
-      const pos = bot?.state?.pos ?? bot?.state?.getState?.("pos");
-      if (pos) {
-        const bx = pos.x ?? 0;
-        const by = pos.y ?? 0;
-        const bz = pos.z ?? 0;
+
+      const bot = gameState.players.find((p) => p.id === selectedBotId);
+      if (bot) {
+        const bx = bot.x ?? 0;
+        const by = bot.y ?? 0;
+        const bz = bot.z ?? 0;
         const wantCam = new Vector3(bx + THIRD_PERSON_OFFSET.x, by + THIRD_PERSON_OFFSET.y, bz + THIRD_PERSON_OFFSET.z);
         const wantTgt = new Vector3(bx, by + THIRD_PERSON_LOOK_AT_Y, bz);
+
         if (!followInitializedRef.current) {
           followPosRef.current.copy(wantCam);
           followTargetRef.current.copy(wantTgt);
           followInitializedRef.current = true;
         }
+
         const isRotating = leftMouseDownRef.current;
         const keepUserAngle = userHasRotatedRef.current;
+
         if (isRotating || keepUserAngle) {
           followTargetRef.current.lerp(wantTgt, Math.min(1, FOLLOW_SMOOTH * delta));
           controls.target.copy(followTargetRef.current);
@@ -131,6 +138,7 @@ export function SpectatorCamera() {
       }
       return;
     }
+
     followInitializedRef.current = false;
     userHasRotatedRef.current = false;
     prevSelectedBotIdRef.current = null;

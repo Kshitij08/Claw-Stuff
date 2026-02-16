@@ -13,6 +13,10 @@ import { createNftRoutes } from './nft/routes.js';
 import { setEmitter } from './betting/service.js';
 import { getProceduralBodyBuffer, getProceduralEyesBuffer, getProceduralMouthBuffer } from './snakeGenerator.js';
 
+// Shooter game imports
+import { ShooterMatchManager } from './shooter/match.js';
+import { createShooterRoutes } from './shooter/routes.js';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
@@ -88,17 +92,25 @@ app.get('/skill.md', (req, res) => {
   res.type('text/markdown');
   res.sendFile(join(__dirname, '../../SKILL.md'));
 });
+app.get('/shooter-skill.md', (req, res) => {
+  res.type('text/markdown');
+  res.sendFile(join(__dirname, '../../SHOOTER-SKILL.md'));
+});
 
 // Serve static files (spectator frontend)
 app.use(express.static(join(__dirname, '../../public')));
 
-// Initialize match manager
+// Initialize match managers
 const matchManager = new MatchManager();
+const shooterMatchManager = new ShooterMatchManager();
 
-// API routes
+// API routes — Snake game
 app.use('/api', createRoutes(matchManager));
 app.use('/api/betting', createBettingRoutes());
 app.use('/api', createNftRoutes());
+
+// API routes — Shooter game
+app.use('/api/shooter', createShooterRoutes(shooterMatchManager));
 
 // Wire betting service WebSocket emitter so betting events are broadcast to spectators
 setEmitter((event: string, data: any) => {
@@ -200,24 +212,84 @@ matchManager.onStatusChange(() => {
   io.emit('status', matchManager.getStatus());
 });
 
+// ══════════════════════════════════════════════════════════════════
+// ── Shooter game Socket.IO namespace (/shooter) ──────────────────
+// ══════════════════════════════════════════════════════════════════
+const shooterNs = io.of('/shooter');
+
+shooterNs.on('connection', (socket) => {
+  const connectedCount = shooterNs.sockets.size;
+  if (connectedCount > MAX_CONNECTIONS) {
+    socket.disconnect(true);
+    return;
+  }
+
+  // Send current state immediately
+  const state = shooterMatchManager.getSpectatorState();
+  if (state) {
+    socket.emit('shooterState', state);
+  }
+  socket.emit('shooterStatus', shooterMatchManager.getStatus());
+
+  socket.on('disconnect', () => {
+    // no-op
+  });
+});
+
+// Throttle shooter broadcasts to ~10 Hz (every other tick)
+let shooterTickCounter = 0;
+shooterMatchManager.onStateUpdate((state) => {
+  shooterTickCounter++;
+  if (shooterTickCounter % 2 === 0) {
+    shooterNs.volatile.emit('shooterState', state);
+  }
+});
+
+shooterMatchManager.onShot((shot) => {
+  shooterNs.volatile.emit('shooterShot', shot);
+});
+
+shooterMatchManager.onHit((hit) => {
+  shooterNs.volatile.emit('shooterHit', hit);
+});
+
+shooterMatchManager.onMatchEndEvent((result) => {
+  shooterNs.emit('shooterMatchEnd', result);
+});
+
+shooterMatchManager.onLobbyOpen((matchId, startsAt) => {
+  shooterNs.emit('shooterLobbyOpen', { matchId, startsAt });
+  shooterNs.emit('shooterStatus', shooterMatchManager.getStatus());
+});
+
+shooterMatchManager.onStatusChange(() => {
+  shooterNs.emit('shooterStatus', shooterMatchManager.getStatus());
+});
+
 // Start server
 httpServer.listen(PORT, () => {
   console.log(`
 ╔══════════════════════════════════════════════════════════════╗
-║                          🐍 CLAW IO 🐍                         ║
+║                    CLAW IO + CLAW SHOOTER                    ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  Server running on http://localhost:${PORT}                      ║
 ║                                                              ║
-║  Spectator view: http://localhost:${PORT}                        ║
-║  API Status:     http://localhost:${PORT}/api/status             ║
+║  Snake spectator:   http://localhost:${PORT}                     ║
+║  Snake API status:  http://localhost:${PORT}/api/status          ║
+║  Shooter spectator: http://localhost:${PORT}/claw-shooter/       ║
+║  Shooter API:       http://localhost:${PORT}/api/shooter/status  ║
 ║                                                              ║
 ║  Mode: ${DEV_MODE ? 'DEVELOPMENT (test keys allowed)' : 'PRODUCTION'}                       ║
 ╚══════════════════════════════════════════════════════════════╝
   `);
 
-  // Start the match scheduler (async initialization)
+  // Start the match schedulers (async initialization)
   matchManager.start().catch((err) => {
-    console.error('Failed to start match manager:', err);
+    console.error('Failed to start snake match manager:', err);
+  });
+
+  shooterMatchManager.start().catch((err) => {
+    console.error('Failed to start shooter match manager:', err);
   });
 });
 
@@ -225,6 +297,7 @@ httpServer.listen(PORT, () => {
 process.on('SIGINT', () => {
   console.log('\nShutting down...');
   matchManager.stop();
+  shooterMatchManager.stop();
   httpServer.close(() => {
     console.log('Server closed');
     process.exit(0);

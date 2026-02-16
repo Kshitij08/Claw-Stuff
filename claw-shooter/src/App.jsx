@@ -1,9 +1,13 @@
+/**
+ * App – refactored to remove client-side Rapier physics.
+ * Physics runs on the server; the client is spectator-only.
+ */
+
 import { Canvas } from "@react-three/fiber";
 import { Experience } from "./components/Experience";
 import { Bloom, EffectComposer } from "@react-three/postprocessing";
 import { Loader, SoftShadows } from "@react-three/drei";
 import { Suspense } from "react";
-import { Physics } from "@react-three/rapier";
 import { Leaderboard } from "./components/Leaderboard";
 import { LeftPanel } from "./components/LeftPanel";
 import { RightPanel } from "./components/RightPanel";
@@ -25,10 +29,8 @@ function App() {
               <SoftShadows size={42} />
 
               <Suspense>
-                <Physics>
-                  <SpectatorCamera />
-                  <Experience />
-                </Physics>
+                <SpectatorCamera />
+                <Experience />
               </Suspense>
 
               <EffectComposer disableNormalPass>

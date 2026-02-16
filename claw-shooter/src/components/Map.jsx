@@ -1,9 +1,34 @@
+/**
+ * Map – visual-only renderer (no client-side Rapier physics).
+ *
+ * Physics runs on the server; this just renders the GLB visually.
+ * Applies the same scale/center transform as before so positions match the server.
+ * MapLevelDebugColliders renders the same geometry as wireframe for debug.
+ */
+
 import { useGLTF } from "@react-three/drei";
 import { Component, useEffect, useMemo } from "react";
-import { RigidBody } from "@react-three/rapier";
 import { Box3, Vector3 } from "three";
+import * as THREE from "three";
 
-/** Error boundary: if Map fails to load (e.g. map4.glb 404), render Map with fallback path. */
+/** World-space horizontal size of the map (same scale/center as MapVisual). Use for arena debug box. */
+export function useMapBounds(pathOverride) {
+  const path = pathOverride ?? MAP_PRIMARY;
+  const mapScene = useGLTF(path);
+  return useMemo(() => {
+    const scene = mapScene.scene;
+    scene.updateMatrixWorld(true);
+    const box = new Box3().setFromObject(scene);
+    const center = box.getCenter(new Vector3());
+    const size = box.getSize(new Vector3());
+    const span = Math.max(size.x, size.z, 0.001);
+    const scale = PLAY_AREA_SIZE / span;
+    const worldSizeX = scale * size.x;
+    const worldSizeZ = scale * size.z;
+    return { worldSizeX, worldSizeZ };
+  }, [mapScene.scene, path]);
+}
+
 class MapErrorBoundary extends Component {
   state = { failed: false };
   static getDerivedStateFromError() {
@@ -11,7 +36,7 @@ class MapErrorBoundary extends Component {
   }
   render() {
     if (this.state.failed) {
-      return <Map path={MAP_FALLBACK} />;
+      return <MapVisualInner path={MAP_FALLBACK} />;
     }
     return this.props.children;
   }
@@ -21,11 +46,9 @@ const BASE = import.meta.env.BASE_URL;
 const MAP_PRIMARY = `${BASE}map4.glb`;
 const MAP_FALLBACK = `${BASE}map.glb`;
 
-/** Play area width (X/Z) so we scale the arena to match. Must match weapons.js MAP_BOUNDS. */
-const PLAY_AREA_SIZE = 90; // MAP_BOUNDS.maxX - MAP_BOUNDS.minX
+const PLAY_AREA_SIZE = 90;
 
-/** @param {{ path?: string }} props - path: optional override (e.g. fallback when map4.glb 404s) */
-export const Map = ({ path: pathOverride }) => {
+export const MapVisualInner = ({ path: pathOverride }) => {
   const path = pathOverride ?? MAP_PRIMARY;
   const mapScene = useGLTF(path);
 
@@ -38,7 +61,6 @@ export const Map = ({ path: pathOverride }) => {
     });
   });
 
-  /* Scale map to play area and compute position so map center is at world (0,0,0). */
   const { scale: mapScale, position: mapPosition } = useMemo(() => {
     mapScene.scene.updateMatrixWorld(true);
     const box = new Box3().setFromObject(mapScene.scene);
@@ -47,30 +69,60 @@ export const Map = ({ path: pathOverride }) => {
     const span = Math.max(size.x, size.z, 0.001);
     const scale = PLAY_AREA_SIZE / span;
     const position = new Vector3(-center.x * scale, -center.y * scale, -center.z * scale);
-    console.log("[Map]", path.split("/").pop(), "bbox span:", span.toFixed(1), "→ scale:", scale.toFixed(3), "center offset:", position.toArray().map((n) => n.toFixed(1)));
     return { scale, position: [position.x, position.y, position.z] };
   }, [mapScene.scene, path]);
 
   return (
-    <RigidBody
-      colliders="trimesh"
-      type="fixed"
-      position={mapPosition}
-      scale={mapScale}
-      userData={{
-        type: "map",
-      }}
-    >
+    <group position={mapPosition} scale={mapScale}>
       <primitive object={mapScene.scene} />
-    </RigidBody>
+    </group>
   );
 };
 useGLTF.preload(MAP_PRIMARY);
 useGLTF.preload(MAP_FALLBACK);
 
-/** Map that tries map4.glb first and falls back to map.glb if the primary fails to load. */
-export const MapWithFallback = () => (
+export const MapVisual = () => (
   <MapErrorBoundary>
-    <Map />
+    <MapVisualInner />
   </MapErrorBoundary>
 );
+
+/** Wireframe overlay of the full level mesh (same as server trimesh collider). */
+export function MapLevelDebugColliders({ path: pathOverride }) {
+  const path = pathOverride ?? MAP_PRIMARY;
+  const mapScene = useGLTF(path);
+
+  const { group, position, scale } = useMemo(() => {
+    const scene = mapScene.scene.clone();
+    scene.traverse((child) => {
+      if (child.isMesh) {
+        const wire = new THREE.Mesh(child.geometry, new THREE.MeshBasicMaterial({
+          wireframe: true,
+          color: 0x4444ff,
+        }));
+        wire.matrix.copy(child.matrix);
+        wire.matrixAutoUpdate = false;
+        child.parent.add(wire);
+        child.visible = false;
+      }
+    });
+    scene.updateMatrixWorld(true);
+    const box = new Box3().setFromObject(scene);
+    const center = box.getCenter(new Vector3());
+    const size = box.getSize(new Vector3());
+    const span = Math.max(size.x, size.z, 0.001);
+    const s = PLAY_AREA_SIZE / span;
+    const pos = new Vector3(-center.x * s, -center.y * s, -center.z * s);
+    return {
+      group: scene,
+      position: [pos.x, pos.y, pos.z],
+      scale: s,
+    };
+  }, [mapScene.scene, path]);
+
+  return (
+    <group position={position} scale={scale}>
+      <primitive object={group} />
+    </group>
+  );
+}

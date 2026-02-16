@@ -55,6 +55,7 @@ export const MapVisualInner = ({ path: pathOverride }) => {
   useEffect(() => {
     mapScene.scene.traverse((child) => {
       if (child.isMesh) {
+        child.visible = true;
         child.castShadow = true;
         child.receiveShadow = true;
       }
@@ -86,6 +87,58 @@ export const MapVisual = () => (
     <MapVisualInner />
   </MapErrorBoundary>
 );
+
+/**
+ * Extract spawn point positions from the GLB scene.
+ * Uses a clone of the scene so positions are in model space (not affected by the map group).
+ * Then applies the same scale/offset as the server (from mesh-only bounding box).
+ * Collects nodes named exactly player_spawn_1 through player_spawn_10 (case-insensitive).
+ */
+export function useSpawnPoints(pathOverride) {
+  const path = pathOverride ?? MAP_PRIMARY;
+  const mapScene = useGLTF(path);
+
+  return useMemo(() => {
+    const scene = mapScene.scene.clone();
+    scene.updateMatrixWorld(true);
+
+    // Build bounding box from mesh geometry only (match server: scale/offset from mesh verts)
+    const box = new Box3();
+    scene.traverse((node) => {
+      if (node.isMesh && node.geometry) {
+        node.geometry.computeBoundingBox();
+        const childBox = node.geometry.boundingBox.clone();
+        childBox.applyMatrix4(node.matrixWorld);
+        box.union(childBox);
+      }
+    });
+
+    const center = box.getCenter(new Vector3());
+    const size = box.getSize(new Vector3());
+    const span = Math.max(size.x, size.z, 0.001);
+    const scale = PLAY_AREA_SIZE / span;
+    const offsetX = -center.x * scale;
+    const offsetY = -center.y * scale;
+    const offsetZ = -center.z * scale;
+
+    // Get spawn positions from clone (scene-local = model space, same as server's raw positions)
+    const points = [];
+    const worldPos = new Vector3();
+    scene.traverse((node) => {
+      const name = (node.name || "").toLowerCase();
+      if (/^player_spawn_(1|2|3|4|5|6|7|8|9|10)$/.test(name)) {
+        node.getWorldPosition(worldPos);
+        points.push({
+          x: worldPos.x * scale + offsetX,
+          y: worldPos.y * scale + offsetY,
+          z: worldPos.z * scale + offsetZ,
+        });
+      }
+    });
+
+    return points;
+  }, [mapScene.scene, path]);
+}
 
 /** Wireframe overlay of the full level mesh (same as server trimesh collider). */
 export function MapLevelDebugColliders({ path: pathOverride }) {

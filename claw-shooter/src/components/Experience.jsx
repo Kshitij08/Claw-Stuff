@@ -11,7 +11,7 @@
  */
 
 import { Environment } from "@react-three/drei";
-import { MapVisual, MapLevelDebugColliders, useMapBounds } from "./Map";
+import { MapVisual, MapLevelDebugColliders, useMapBounds, useSpawnPoints } from "./Map";
 import { useEffect, useRef, useMemo } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Vector3 } from "three";
@@ -156,6 +156,7 @@ export const Experience = ({ downgradedPerformance = false }) => {
   const pickups = gameState?.pickups ?? [];
   const bullets = gameState?.bullets ?? [];
   const mapBounds = useMapBounds();
+  const spawnPoints = useSpawnPoints();
 
   for (const p of players) {
     if (!prevPosRefs.current.has(p.id)) {
@@ -218,6 +219,13 @@ export const Experience = ({ downgradedPerformance = false }) => {
             <mesh key={`debug-bullet-${b.id}`} position={[b.x, b.y, b.z]}>
               <sphereGeometry args={[BULLET_RADIUS, 6, 4]} />
               <meshBasicMaterial wireframe color="#ffaa00" />
+            </mesh>
+          ))}
+          {/* Spawn point debug cones */}
+          {spawnPoints.map((sp, i) => (
+            <mesh key={`debug-spawn-${i}`} position={[sp.x, sp.y + 1, sp.z]}>
+              <coneGeometry args={[1, 2, 8]} />
+              <meshBasicMaterial wireframe color="#ff00ff" />
             </mesh>
           ))}
           <group position={[0, -2.5, 0]}>

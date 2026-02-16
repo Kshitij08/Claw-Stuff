@@ -34,6 +34,24 @@ const TARGET_PERSISTENCE_MS = 0;
 const STUCK_RECOVERY_DURATIONS = [500, 900, 1400];
 const RECOVERY_QUADRANT_AVOID_MS = 1500;
 
+/* ── Wall-following / waypoint navigation ────────────────────────── */
+/** How long to persist a wall-follow side before re-evaluating */
+const WALL_FOLLOW_PERSIST_MS = 1200;
+/** Max time to wall-follow before giving up and trying something else */
+const WALL_FOLLOW_MAX_MS = 4000;
+/** Distance at which a waypoint is considered "reached" */
+const WAYPOINT_REACH_DIST = 2.0;
+/** How far ahead to place intermediate waypoints */
+const WAYPOINT_DISTANCE = 5.0;
+/** Max waypoints to chain before resetting */
+const MAX_WAYPOINT_CHAIN = 3;
+/** Position history length for oscillation detection */
+const POS_HISTORY_LENGTH = 6;
+/** Interval to sample position history (ms) */
+const POS_HISTORY_INTERVAL = 250;
+/** If all history positions fit in this radius, bot is oscillating */
+const OSCILLATION_RADIUS = 1.5;
+
 /* ── Tuning constants ──────────────────────────────────────────── */
 const BASE_MOVEMENT_SPEED = 260;
 const MELEE_RANGE = 2.0;
@@ -85,10 +103,17 @@ function hasLineOfSight(world, rapier, fromPos, toPos, excludeRigidBodyHandle = 
   return hit.toi >= len * LOS_THRESHOLD;
 }
 
-/** Try desiredAngle first, then offsets ±30°, ±60°, ±90°; return angle with longest clear distance. */
+/** Try desiredAngle first, then offsets ±22.5°, ±45°, ±67.5°, ±90°, ±120°; return angle with longest clear distance. */
 function findClearDirection(world, rapier, origin, desiredAngle, lookahead, excludeRigidBodyHandle = null) {
   if (!world || !rapier) return desiredAngle;
-  const offsets = [0, Math.PI / 6, -Math.PI / 6, Math.PI / 3, -Math.PI / 3, Math.PI / 2, -Math.PI / 2];
+  const offsets = [
+    0,
+    Math.PI / 8, -Math.PI / 8,
+    Math.PI / 4, -Math.PI / 4,
+    Math.PI * 3 / 8, -Math.PI * 3 / 8,
+    Math.PI / 2, -Math.PI / 2,
+    Math.PI * 2 / 3, -Math.PI * 2 / 3,
+  ];
   let bestAngle = desiredAngle;
   let bestToi = 0;
   for (const off of offsets) {
@@ -103,24 +128,57 @@ function findClearDirection(world, rapier, origin, desiredAngle, lookahead, excl
   return bestAngle;
 }
 
-/** Eight directions every 45°; return angle with longest clear distance, preferring toward targetAngle. */
-function findLongestClearDirection(world, rapier, origin, targetAngle, maxDist, excludeRigidBodyHandle = null) {
+/** Normalize an angle to [-PI, PI]. */
+function normalizeAngle(a) {
+  while (a > Math.PI) a -= Math.PI * 2;
+  while (a < -Math.PI) a += Math.PI * 2;
+  return a;
+}
+
+/**
+ * Scored navigation: 16 directions (22.5° apart).
+ * Scores by: clearDistance (weighted) + alignment with targetAngle (weighted).
+ * Returns best angle that balances forward progress and open space.
+ */
+function findBestNavigationAngle(world, rapier, origin, targetAngle, maxDist, excludeRigidBodyHandle = null) {
   if (!world || !rapier) return targetAngle;
-  const candidates = [];
-  for (let i = 0; i < 8; i++) {
-    const angle = (i / 8) * Math.PI * 2;
+  const NUM_RAYS = 16;
+  let bestAngle = targetAngle;
+  let bestScore = -Infinity;
+  for (let i = 0; i < NUM_RAYS; i++) {
+    const angle = (i / NUM_RAYS) * Math.PI * 2;
     const hit = castRay(world, rapier, origin, angle, maxDist, excludeRigidBodyHandle);
     const toi = hit ? hit.toi : maxDist;
-    let diff = angle - targetAngle;
-    while (diff > Math.PI) diff -= Math.PI * 2;
-    while (diff < -Math.PI) diff += Math.PI * 2;
-    candidates.push({ angle, toi, diff: Math.abs(diff) });
+    const normalizedToi = toi / maxDist;
+    const diff = Math.abs(normalizeAngle(angle - targetAngle));
+    const alignment = 1 - diff / Math.PI;
+    const score = normalizedToi * 0.55 + alignment * 0.45;
+    if (score > bestScore) {
+      bestScore = score;
+      bestAngle = angle;
+    }
   }
-  candidates.sort((a, b) => {
-    if (Math.abs(b.toi - a.toi) < 0.1) return a.diff - b.diff;
-    return b.toi - a.toi;
-  });
-  return candidates[0].angle;
+  return bestAngle;
+}
+
+/**
+ * Cast rays to find the wall normal direction at the current position.
+ * Returns the angle pointing away from the nearest wall, or null if no wall nearby.
+ */
+function findWallNormalAngle(world, rapier, origin, maxDist, excludeRigidBodyHandle = null) {
+  if (!world || !rapier) return null;
+  let closestToi = Infinity;
+  let closestAngle = 0;
+  for (let i = 0; i < 16; i++) {
+    const angle = (i / 16) * Math.PI * 2;
+    const hit = castRay(world, rapier, origin, angle, maxDist, excludeRigidBodyHandle);
+    if (hit && hit.toi < closestToi) {
+      closestToi = hit.toi;
+      closestAngle = angle;
+    }
+  }
+  if (closestToi >= maxDist) return null;
+  return normalizeAngle(closestAngle + Math.PI);
 }
 
 /** Advantage score: positive = favorable fight. Uses health, weapon tier, lives, ammo, distance. */
@@ -379,6 +437,16 @@ export const BotController = ({
   /* Persist "path around obstacle" angle to avoid left-right oscillation when no LOS */
   const noLOSPathRef = useRef({ angle: 0, until: 0 });
 
+  /* Wall-following state: side = 1 (right) or -1 (left), startTime, until */
+  const wallFollowRef = useRef({ active: false, side: 1, startTime: 0, until: 0, targetId: null });
+
+  /* Intermediate waypoint navigation */
+  const waypointRef = useRef({ pos: null, chainCount: 0, setTime: 0 });
+
+  /* Position history for oscillation detection */
+  const posHistoryRef = useRef([]);
+  const posHistoryTimeRef = useRef(0);
+
   /* Ref so setTimeout always uses the latest spawn function */
   const spawnFnRef = useRef(null);
   /* Track if we've placed initial spawn so we only enable body after placement (avoid 0,0,0) */
@@ -597,7 +665,7 @@ export const BotController = ({
       state.setState("ammo", null);
       state.setState("aliveSince", Date.now());
 
-      /* Reset stuck detection and engagement on respawn */
+      /* Reset stuck detection, navigation state, and engagement on respawn */
       stuckAccumRef.current = 0;
       stuckConsecutiveCountRef.current = 0;
       recoveryRef.current = { active: false, angle: 0, until: 0 };
@@ -605,6 +673,9 @@ export const BotController = ({
       engagementRef.current = { targetId: null, startTime: 0, lastDist: Infinity, lastCheckTime: 0 };
       targetPersistRef.current = { id: null, until: 0 };
       flankWaypointRef.current = null;
+      wallFollowRef.current = { active: false, side: 1, startTime: 0, until: 0, targetId: null };
+      waypointRef.current = { pos: null, chainCount: 0, setTime: 0 };
+      posHistoryRef.current = [];
     }, RESPAWN_DELAY);
 
     return () => clearTimeout(timer);
@@ -701,7 +772,16 @@ export const BotController = ({
       noLOSPathRef.current = { angle: 0, until: 0 };
     }
 
-    /* ── Stuck detection & raycast-based recovery ── */
+    /* ── Position history for oscillation detection ── */
+    if (now - posHistoryTimeRef.current > POS_HISTORY_INTERVAL) {
+      posHistoryTimeRef.current = now;
+      posHistoryRef.current.push({ x: myPos.x, z: myPos.z, t: now });
+      if (posHistoryRef.current.length > POS_HISTORY_LENGTH) {
+        posHistoryRef.current.shift();
+      }
+    }
+
+    /* ── Stuck detection & raycast-based recovery (improved with oscillation check) ── */
     if (now - lastStuckCheckRef.current > STUCK_CHECK_INTERVAL) {
       lastStuckCheckRef.current = now;
       if (lastStuckPosRef.current) {
@@ -715,11 +795,24 @@ export const BotController = ({
       }
       lastStuckPosRef.current = { x: myPos.x, y: myPos.y, z: myPos.z };
 
-      if (
-        stuckAccumRef.current >= STUCK_TIME_THRESHOLD &&
-        !recoveryRef.current.active
-      ) {
-        /* Stuck for >1 s: switch to another target so we don't keep chasing the same bot */
+      /* Oscillation detection: if all recent positions cluster in a small radius */
+      let isOscillating = false;
+      const hist = posHistoryRef.current;
+      if (hist.length >= POS_HISTORY_LENGTH) {
+        let cx = 0, cz = 0;
+        for (const h of hist) { cx += h.x; cz += h.z; }
+        cx /= hist.length; cz /= hist.length;
+        let maxDistFromCenter = 0;
+        for (const h of hist) {
+          const dd = Math.sqrt((h.x - cx) ** 2 + (h.z - cz) ** 2);
+          if (dd > maxDistFromCenter) maxDistFromCenter = dd;
+        }
+        if (maxDistFromCenter < OSCILLATION_RADIUS) isOscillating = true;
+      }
+
+      const shouldRecover = (stuckAccumRef.current >= STUCK_TIME_THRESHOLD || isOscillating) && !recoveryRef.current.active;
+
+      if (shouldRecover) {
         if (nearest?.id && allEnemies.length > 1) {
           nearest = selectTarget(allEnemies, myHealth, nearest.id);
           engagementRef.current = { ...engagementRef.current, targetId: nearest?.id ?? null, startTime: now, lastDist: nearest?.distance ?? Infinity, lastCheckTime: now };
@@ -727,23 +820,34 @@ export const BotController = ({
         stuckConsecutiveCountRef.current = Math.min(2, stuckConsecutiveCountRef.current + 1);
         const durationIndex = Math.min(stuckConsecutiveCountRef.current, STUCK_RECOVERY_DURATIONS.length - 1);
         const duration = STUCK_RECOVERY_DURATIONS[durationIndex];
-        const base = lastMoveAngleRef.current;
-        let preferredAngle = base;
-        if (nearest && world && rapier) {
+
+        /* Use wall normal to pick a perpendicular escape direction */
+        let recoveryAngle;
+        const wallNormal = findWallNormalAngle(world, rapier, rayOrigin, OBSTACLE_LOOKAHEAD * 2, myRigidBodyHandle);
+        if (wallNormal !== null) {
           const side = (recoveryQuadrantRef.current % 2 === 0) ? 1 : -1;
-          preferredAngle = nearest.angle + (Math.PI / 2) * side;
+          const perpAngle = wallNormal + (Math.PI / 2) * side;
           recoveryQuadrantRef.current += 1;
+          recoveryAngle = findBestNavigationAngle(world, rapier, rayOrigin, perpAngle, OBSTACLE_LOOKAHEAD * 2.5, myRigidBodyHandle);
+        } else {
+          const side = (recoveryQuadrantRef.current % 2 === 0) ? 1 : -1;
+          const preferredAngle = nearest ? nearest.angle + (Math.PI / 2) * side : lastMoveAngleRef.current + Math.PI;
+          recoveryQuadrantRef.current += 1;
+          recoveryAngle = findBestNavigationAngle(world, rapier, rayOrigin, preferredAngle, OBSTACLE_LOOKAHEAD * 2.5, myRigidBodyHandle);
         }
-        const recoveryAngle = findLongestClearDirection(world, rapier, rayOrigin, preferredAngle, OBSTACLE_LOOKAHEAD * 2.5, myRigidBodyHandle);
+
         lastRecoveryTimeRef.current = now;
         recoveryRef.current = { active: true, angle: recoveryAngle, until: now + duration };
         stuckAccumRef.current = 0;
+        posHistoryRef.current = [];
+        waypointRef.current = { pos: null, chainCount: 0, setTime: 0 };
+        wallFollowRef.current.active = false;
       }
     }
     if (recoveryRef.current.active && now > recoveryRef.current.until) {
       recoveryRef.current.active = false;
     }
-    if (vec3(myPos).distanceTo(vec3(lastStuckPosRef.current)) >= STUCK_DISTANCE_THRESHOLD) {
+    if (lastStuckPosRef.current && vec3(myPos).distanceTo(vec3(lastStuckPosRef.current)) >= STUCK_DISTANCE_THRESHOLD) {
       stuckConsecutiveCountRef.current = 0;
     }
 
@@ -869,7 +973,7 @@ export const BotController = ({
       stateLabel = "Run";
     }
 
-    /* ── No LOS to target (wall/obstacle): move in clearest direction to path around; persist angle to avoid left-right oscillation ── */
+    /* ── Wall-following + waypoint navigation when no LOS to target ── */
     if (
       moveAngle !== null &&
       nearest &&
@@ -878,30 +982,97 @@ export const BotController = ({
       rapier &&
       !recoveryRef.current.active
     ) {
-      let towardTarget = moveAngle - nearest.angle;
-      while (towardTarget > Math.PI) towardTarget -= Math.PI * 2;
-      while (towardTarget < -Math.PI) towardTarget += Math.PI * 2;
-      if (Math.abs(towardTarget) < 1.0) {
-        const pathRef = noLOSPathRef.current;
-        if (now < pathRef.until) {
-          moveAngle = pathRef.angle;
+      const wf = wallFollowRef.current;
+
+      /* Reset wall-follow if we switched targets */
+      if (wf.active && wf.targetId !== nearest.id) {
+        wf.active = false;
+      }
+
+      /* Check if we have an active waypoint to navigate to */
+      const wp = waypointRef.current;
+      let navigatingToWaypoint = false;
+      if (wp.pos) {
+        const wpDist = Math.sqrt((myPos.x - wp.pos.x) ** 2 + (myPos.z - wp.pos.z) ** 2);
+        if (wpDist < WAYPOINT_REACH_DIST || now - wp.setTime > 3000) {
+          waypointRef.current = { pos: null, chainCount: wp.chainCount, setTime: 0 };
         } else {
-          moveAngle = findLongestClearDirection(
-            world,
-            rapier,
-            rayOrigin,
-            nearest.angle,
-            OBSTACLE_LOOKAHEAD * 4,
-            myRigidBodyHandle
-          );
-          noLOSPathRef.current = { angle: moveAngle, until: now + NO_LOS_PATH_PERSIST_MS };
+          const wpAngle = -Math.atan2(wp.pos.z - myPos.z, wp.pos.x - myPos.x) + Math.PI / 2;
+          const wpHasLOS = hasLineOfSight(world, rapier, myPos, wp.pos, myRigidBodyHandle);
+          if (wpHasLOS) {
+            moveAngle = wpAngle;
+            navigatingToWaypoint = true;
+          } else {
+            waypointRef.current = { pos: null, chainCount: wp.chainCount, setTime: 0 };
+          }
         }
       }
+
+      if (!navigatingToWaypoint) {
+        /* Activate wall-following if not already active */
+        if (!wf.active) {
+          const leftAngle = nearest.angle + Math.PI / 2;
+          const rightAngle = nearest.angle - Math.PI / 2;
+          const leftHit = castRay(world, rapier, rayOrigin, leftAngle, OBSTACLE_LOOKAHEAD * 3, myRigidBodyHandle);
+          const rightHit = castRay(world, rapier, rayOrigin, rightAngle, OBSTACLE_LOOKAHEAD * 3, myRigidBodyHandle);
+          const leftClear = leftHit ? leftHit.toi : OBSTACLE_LOOKAHEAD * 3;
+          const rightClear = rightHit ? rightHit.toi : OBSTACLE_LOOKAHEAD * 3;
+          const chosenSide = leftClear >= rightClear ? 1 : -1;
+          wallFollowRef.current = {
+            active: true,
+            side: chosenSide,
+            startTime: now,
+            until: now + WALL_FOLLOW_MAX_MS,
+            targetId: nearest.id,
+          };
+        }
+
+        /* Wall-follow expired */
+        if (wf.active && now > wf.until) {
+          wallFollowRef.current.active = false;
+        }
+
+        if (wallFollowRef.current.active) {
+          /* Wall-following: move perpendicular to the target direction on the chosen side */
+          const followAngle = nearest.angle + (Math.PI / 3) * wallFollowRef.current.side;
+          moveAngle = findBestNavigationAngle(
+            world, rapier, rayOrigin, followAngle,
+            OBSTACLE_LOOKAHEAD * 4, myRigidBodyHandle
+          );
+
+          /* Try to place a waypoint that makes progress toward the target */
+          if (waypointRef.current.chainCount < MAX_WAYPOINT_CHAIN) {
+            const wpX = myPos.x + Math.sin(moveAngle) * WAYPOINT_DISTANCE;
+            const wpZ = myPos.z + Math.cos(moveAngle) * WAYPOINT_DISTANCE;
+            const candidateWP = { x: wpX, y: myPos.y, z: wpZ };
+            const wpClear = hasLineOfSight(world, rapier, myPos, candidateWP, myRigidBodyHandle);
+            if (wpClear) {
+              waypointRef.current = { pos: candidateWP, chainCount: waypointRef.current.chainCount + 1, setTime: now };
+            }
+          }
+        } else {
+          /* Fallback: use scored navigation toward target */
+          const pathRef = noLOSPathRef.current;
+          if (now < pathRef.until) {
+            moveAngle = pathRef.angle;
+          } else {
+            moveAngle = findBestNavigationAngle(
+              world, rapier, rayOrigin, nearest.angle,
+              OBSTACLE_LOOKAHEAD * 4, myRigidBodyHandle
+            );
+            noLOSPathRef.current = { angle: moveAngle, until: now + NO_LOS_PATH_PERSIST_MS };
+          }
+        }
+      }
+    } else if (hasLOSToTarget && nearest) {
+      /* We have LOS again: reset wall-follow and waypoint state */
+      wallFollowRef.current.active = false;
+      waypointRef.current = { pos: null, chainCount: 0, setTime: 0 };
     }
 
     if (moveAngle !== null) lastMoveAngleRef.current = moveAngle;
 
-    /* ── Obstacle-aware movement: raycast and steer around obstacles ── */
+    /* ── Obstacle-aware movement: raycast and steer around nearby obstacles ── */
     if (moveAngle !== null && world && rapier) {
       moveAngle = findClearDirection(world, rapier, rayOrigin, moveAngle, OBSTACLE_LOOKAHEAD, myRigidBodyHandle);
     }

@@ -24,6 +24,12 @@ const LOS_THRESHOLD = 0.98;
 const STALEMATE_CHECK_INTERVAL = 300;
 const STALEMATE_DIST_DELTA = 0.35;
 const STALEMATE_TIME_THRESHOLD = 1000; // 1 s stuck → change target
+/** When no line of sight to target (wall/obstacle), switch target after this ms so we don't stalemate */
+const NO_LOS_STANDOFF_MS = 150;
+/** When only 2 bots and we give up on the other (no LOS), don't re-select them for this long so we actually wander */
+const NO_LOS_EXCLUDE_DURATION_MS = 3000;
+/** Persist "path around obstacle" direction this long to avoid left-right oscillation */
+const NO_LOS_PATH_PERSIST_MS = 700;
 const TARGET_PERSISTENCE_MS = 0;
 const STUCK_RECOVERY_DURATIONS = [500, 900, 1400];
 const RECOVERY_QUADRANT_AVOID_MS = 1500;
@@ -144,9 +150,13 @@ function evaluateMatchup(myState, enemyEntry, myPos) {
 /**
  * Pick target: nearest first; among similar distance prefer lower health and inferior weapon.
  * excludeId: when in stalemate or stuck with current target, switch to another bot.
+ * excludeUntil: { [enemyId]: timestamp } — don't select these until after timestamp (e.g. no-LOS give-up).
  */
-function selectTarget(allEnemies, myHealth, excludeId = null) {
+function selectTarget(allEnemies, myHealth, excludeId = null, excludeUntil = null, now = 0) {
   let list = allEnemies;
+  if (excludeUntil != null && now > 0) {
+    list = list.filter((e) => (excludeUntil[e.id] ?? 0) <= now);
+  }
   if (excludeId && list.length > 1) {
     list = list.filter((e) => e.id !== excludeId);
   }
@@ -363,9 +373,11 @@ export const BotController = ({
   const recoveryQuadrantRef = useRef(0);
 
   /* Stalemate / engagement */
-  const engagementRef = useRef({ targetId: null, startTime: 0, lastDist: Infinity, lastCheckTime: 0 });
+  const engagementRef = useRef({ targetId: null, startTime: 0, lastDist: Infinity, lastCheckTime: 0, noLOSExcludeUntil: {} });
   const targetPersistRef = useRef({ id: null, until: 0 });
   const flankWaypointRef = useRef(null);
+  /* Persist "path around obstacle" angle to avoid left-right oscillation when no LOS */
+  const noLOSPathRef = useRef({ angle: 0, until: 0 });
 
   /* Ref so setTimeout always uses the latest spawn function */
   const spawnFnRef = useRef(null);
@@ -652,8 +664,9 @@ export const BotController = ({
     const myRigidBodyHandle = excludeHandle?.handle ?? null;
     const rayOrigin = { x: myPos.x, y: RAY_ORIGIN_Y, z: myPos.z };
 
-    /* First pick: current target (no persistence = re-evaluate every frame) */
-    let nearest = selectTarget(allEnemies, myHealth, null);
+    /* First pick: current target; respect no-LOS exclude so 2 bots don't re-target each other across a wall */
+    const excludeUntil = engagementRef.current.noLOSExcludeUntil || {};
+    let nearest = selectTarget(allEnemies, myHealth, null, excludeUntil, now);
     const hasLOSToTarget = nearest && world && rapier && hasLineOfSight(world, rapier, myPos, nearest.pos, myRigidBodyHandle);
 
     /* Stalemate: distance not changing or obstacle between us → switch to another bot for better odds */
@@ -661,14 +674,15 @@ export const BotController = ({
     if (nearest?.id) {
       const eng = engagementRef.current;
       if (eng.targetId !== nearest.id) {
-        engagementRef.current = { targetId: nearest.id, startTime: now, lastDist: nearest.distance, lastCheckTime: now };
+        engagementRef.current = { ...eng, targetId: nearest.id, startTime: now, lastDist: nearest.distance, lastCheckTime: now };
+        noLOSPathRef.current = { angle: 0, until: 0 }; /* fresh target → recompute path-around direction */
       } else if (now - eng.lastCheckTime > STALEMATE_CHECK_INTERVAL) {
         engagementRef.current.lastCheckTime = now;
         const distDelta = Math.abs(nearest.distance - eng.lastDist);
         engagementRef.current.lastDist = nearest.distance;
         const timeEngaged = now - eng.startTime;
         const stuckStandoff = distDelta < STALEMATE_DIST_DELTA && timeEngaged > STALEMATE_TIME_THRESHOLD;
-        const noLOSStandoff = !hasLOSToTarget && timeEngaged > 350;
+        const noLOSStandoff = !hasLOSToTarget && timeEngaged > NO_LOS_STANDOFF_MS;
         if (stuckStandoff || noLOSStandoff) {
           switchTargetId = nearest.id;
           engagementRef.current.startTime = now;
@@ -680,6 +694,11 @@ export const BotController = ({
 
     if (switchTargetId && allEnemies.length > 1) {
       nearest = selectTarget(allEnemies, myHealth, switchTargetId);
+    }
+    /* When only 2 bots and we gave up on the other (no LOS), don't re-select them for a while so we wander and break the loop */
+    if (switchTargetId && allEnemies.length === 2 && nearest == null) {
+      engagementRef.current.noLOSExcludeUntil = { ...(engagementRef.current.noLOSExcludeUntil || {}), [switchTargetId]: now + NO_LOS_EXCLUDE_DURATION_MS };
+      noLOSPathRef.current = { angle: 0, until: 0 };
     }
 
     /* ── Stuck detection & raycast-based recovery ── */
@@ -703,7 +722,7 @@ export const BotController = ({
         /* Stuck for >1 s: switch to another target so we don't keep chasing the same bot */
         if (nearest?.id && allEnemies.length > 1) {
           nearest = selectTarget(allEnemies, myHealth, nearest.id);
-          engagementRef.current = { targetId: nearest?.id ?? null, startTime: now, lastDist: nearest?.distance ?? Infinity, lastCheckTime: now };
+          engagementRef.current = { ...engagementRef.current, targetId: nearest?.id ?? null, startTime: now, lastDist: nearest?.distance ?? Infinity, lastCheckTime: now };
         }
         stuckConsecutiveCountRef.current = Math.min(2, stuckConsecutiveCountRef.current + 1);
         const durationIndex = Math.min(stuckConsecutiveCountRef.current, STUCK_RECOVERY_DURATIONS.length - 1);
@@ -837,6 +856,36 @@ export const BotController = ({
     if (recoveryRef.current.active) {
       moveAngle = recoveryRef.current.angle;
       stateLabel = "Run";
+    }
+
+    /* ── No LOS to target (wall/obstacle): move in clearest direction to path around; persist angle to avoid left-right oscillation ── */
+    if (
+      moveAngle !== null &&
+      nearest &&
+      !hasLOSToTarget &&
+      world &&
+      rapier &&
+      !recoveryRef.current.active
+    ) {
+      let towardTarget = moveAngle - nearest.angle;
+      while (towardTarget > Math.PI) towardTarget -= Math.PI * 2;
+      while (towardTarget < -Math.PI) towardTarget += Math.PI * 2;
+      if (Math.abs(towardTarget) < 1.0) {
+        const pathRef = noLOSPathRef.current;
+        if (now < pathRef.until) {
+          moveAngle = pathRef.angle;
+        } else {
+          moveAngle = findLongestClearDirection(
+            world,
+            rapier,
+            rayOrigin,
+            nearest.angle,
+            OBSTACLE_LOOKAHEAD * 4,
+            myRigidBodyHandle
+          );
+          noLOSPathRef.current = { angle: moveAngle, until: now + NO_LOS_PATH_PERSIST_MS };
+        }
+      }
     }
 
     if (moveAngle !== null) lastMoveAngleRef.current = moveAngle;

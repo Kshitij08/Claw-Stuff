@@ -16,8 +16,7 @@ import {
   TICK_MS,
 } from './constants.js';
 
-const EFFECTIVE_LOBBY_DURATION =
-  process.env.NODE_ENV === 'production' ? SHOOTER_LOBBY_DURATION : 90 * 1000;
+const EFFECTIVE_LOBBY_DURATION = SHOOTER_LOBBY_DURATION; // 5s countdown (dev and prod)
 
 const DEBOUNCE_BETTING_MS = 5_000;
 

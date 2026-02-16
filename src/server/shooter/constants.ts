@@ -82,10 +82,10 @@ export const MAP_BOUNDS = {
   maxZ: 45,
 };
 
-export const MOVEMENT_SPEED = 260 / 1000; // units per ms (client uses 260, we tick in ms)
+export const MOVEMENT_SPEED = 120 / 1000; // units per ms (reduced so agents don't teleport with latency)
 export const TICK_MS = 50; // 20 ticks per second
 
-export const SHOOTER_LOBBY_DURATION = 90 * 1000; // 90s countdown after 2nd join
+export const SHOOTER_LOBBY_DURATION = 5 * 1000; // 5s countdown after 2nd join
 export const SHOOTER_MATCH_DURATION = 4 * 60 * 1000; // 4 minutes
 export const SHOOTER_RESULTS_DURATION = 10 * 1000; // 10s results
 export const SHOOTER_BETTING_CLOSE_BEFORE_START = 10 * 1000; // close betting 10s before match start

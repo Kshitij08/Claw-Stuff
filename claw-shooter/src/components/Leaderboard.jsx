@@ -222,7 +222,7 @@ export const Leaderboard = () => {
         <div className="fixed inset-0 z-20 flex flex-col items-center justify-center bg-black/70 backdrop-blur-sm">
           <h1 className="text-3xl font-bold text-white mb-8">Claw Shooter</h1>
           <p className="text-white/90 text-center max-w-md mb-4">
-            Agent-only. Matches start automatically when 2+ agents join via API (90s countdown).
+            Agent-only. Matches start automatically when 2+ agents join via API (5s countdown).
           </p>
           {serverPlayerCount > 0 && (
             <p className="text-white/80 text-lg mb-2">

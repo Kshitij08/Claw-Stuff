@@ -41,6 +41,7 @@ import {
   BULLET_SPEED,
   BULLET_MAX_AGE_MS,
   BULLET_MASS,
+  SPAWN_FLOOR_Y_OFFSET,
   type WeaponType,
 } from '../../shared/shooter-constants.js';
 import { loadMapGeometry, createMapCollider, type SpawnPoint, type MapGeometry } from './glb-loader.js';
@@ -105,6 +106,8 @@ export class ShooterEngine {
   private tickTimer: NodeJS.Timeout | null = null;
   private bulletIdCounter = 0;
   private activeBullets: ActiveBullet[] = [];
+  /** Constant floor Y (feet) for all players so height never varies. */
+  private arenaFloorY = 0;
 
   /** Per-player desired movement direction. Persists until 'stop' action. */
   private moveIntents: Map<string, { angle: number }> = new Map();
@@ -177,8 +180,9 @@ export class ShooterEngine {
     this.bulletIdCounter = 0;
     resetCharacterIndex();
 
-    // Set the default floor Y and playable bounds from spawn points
-    setDefaultFloorY(this.getFloorY());
+    // Set floor Y below min spawn so bots spawn on the ground (spawn markers may be placed above floor)
+    this.arenaFloorY = this.getFloorY() - SPAWN_FLOOR_Y_OFFSET;
+    setDefaultFloorY(this.arenaFloorY);
     setPlayableBounds(this.mapGeometry.spawnPoints);
 
     this.match = {
@@ -210,6 +214,7 @@ export class ShooterEngine {
     const spawn = this.getValidSpawnPoint();
 
     const player = createPlayer(playerId, name, spawn, strategyTag, options);
+    player.y = this.arenaFloorY; // Constant floor Y for all bots
     this.match.players.set(playerId, player);
 
     this.createPlayerBody(player);
@@ -631,9 +636,7 @@ export class ShooterEngine {
 
       const pos = body.rigidBody.translation();
       player.x = pos.x;
-      // Store the feet-level Y (capsule center minus half-height minus radius)
-      // so the client can position characters without guessing offsets.
-      player.y = pos.y - PLAYER_CAPSULE_HALF_HEIGHT - PLAYER_CAPSULE_RADIUS;
+      player.y = this.arenaFloorY; // Constant floor Y throughout the game
       player.z = pos.z;
 
       const skinBound = PLAYER_CAPSULE_RADIUS + 0.15;
@@ -647,9 +650,9 @@ export class ShooterEngine {
 
       if (outOfBounds) {
         const spawn = this.getValidSpawnPoint();
-        const bodyY = spawn.y + PLAYER_CAPSULE_HALF_HEIGHT + PLAYER_CAPSULE_RADIUS;
+        const bodyY = this.arenaFloorY + PLAYER_CAPSULE_HALF_HEIGHT + PLAYER_CAPSULE_RADIUS;
         player.x = spawn.x;
-        player.y = spawn.y;
+        player.y = this.arenaFloorY;
         player.z = spawn.z;
         body.rigidBody.setNextKinematicTranslation({ x: spawn.x, y: bodyY, z: spawn.z });
       } else {
@@ -843,13 +846,13 @@ export class ShooterEngine {
     return PLAYER_CAPSULE_HALF_HEIGHT + PLAYER_CAPSULE_RADIUS;
   }
 
-  /** Get the floor Y level (average of spawn point Y values). Used for pickups. */
+  /** Get the floor Y (minimum spawn Y) so everyone spawns on the ground. */
   getFloorY(): number {
     const spawns = this.mapGeometry.spawnPoints;
     if (spawns.length === 0) return 0;
-    let sum = 0;
-    for (const sp of spawns) sum += sp.y;
-    return sum / spawns.length;
+    let minY = spawns[0].y;
+    for (const sp of spawns) if (sp.y < minY) minY = sp.y;
+    return minY;
   }
 
   // ── Combat ────────────────────────────────────────────────────────
@@ -1232,12 +1235,12 @@ export class ShooterEngine {
       const spawn = this.getRespawnSpawnPoint(player.id);
 
       if (respawnPlayer(player, spawn)) {
+        player.y = this.arenaFloorY; // Constant floor Y
         const body = this.playerBodies.get(player.id);
         if (body) {
-          const bodyY = spawn.y + PLAYER_CAPSULE_HALF_HEIGHT + PLAYER_CAPSULE_RADIUS;
+          const bodyY = this.arenaFloorY + PLAYER_CAPSULE_HALF_HEIGHT + PLAYER_CAPSULE_RADIUS;
           const pos = { x: spawn.x, y: bodyY, z: spawn.z };
           body.rigidBody.setNextKinematicTranslation(pos);
-          // Set current position immediately so sync/broadcast this tick has correct position
           body.rigidBody.setTranslation(pos, true);
         }
       }

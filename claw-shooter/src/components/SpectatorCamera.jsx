@@ -18,6 +18,8 @@ const MAP_CENTER = new Vector3(0, 0, 0);
 const THIRD_PERSON_OFFSET = new Vector3(0, 6, 10);
 const THIRD_PERSON_LOOK_AT_Y = 1.5;
 const FOLLOW_SMOOTH = 12;
+/** Smooth the followed bot position so the camera doesn't stutter when server state updates (20 Hz). */
+const BOT_POS_SMOOTH = 10;
 
 export function SpectatorCamera() {
   const controlsRef = useRef();
@@ -25,6 +27,7 @@ export function SpectatorCamera() {
   const { selectedBotId, setSelectedBotId, gameState } = useGameManager();
   const followPosRef = useRef(new Vector3());
   const followTargetRef = useRef(new Vector3());
+  const followBotPosRef = useRef(new Vector3()); // Smoothed bot position to avoid stutter
   const followInitializedRef = useRef(false);
   const leftMouseDownRef = useRef(false);
   const userHasRotatedRef = useRef(false);
@@ -112,14 +115,22 @@ export function SpectatorCamera() {
         const bx = bot.x ?? 0;
         const by = bot.y ?? 0;
         const bz = bot.z ?? 0;
-        const wantCam = new Vector3(bx + THIRD_PERSON_OFFSET.x, by + THIRD_PERSON_OFFSET.y, bz + THIRD_PERSON_OFFSET.z);
-        const wantTgt = new Vector3(bx, by + THIRD_PERSON_LOOK_AT_Y, bz);
+        const rawBot = new Vector3(bx, by, bz);
 
         if (!followInitializedRef.current) {
-          followPosRef.current.copy(wantCam);
-          followTargetRef.current.copy(wantTgt);
+          followBotPosRef.current.copy(rawBot);
+          followPosRef.current.set(bx + THIRD_PERSON_OFFSET.x, by + THIRD_PERSON_OFFSET.y, bz + THIRD_PERSON_OFFSET.z);
+          followTargetRef.current.set(bx, by + THIRD_PERSON_LOOK_AT_Y, bz);
           followInitializedRef.current = true;
         }
+
+        // Smooth bot position so camera doesn't stutter when server state jumps (20 Hz)
+        followBotPosRef.current.lerp(rawBot, Math.min(1, BOT_POS_SMOOTH * delta));
+        const sx = followBotPosRef.current.x;
+        const sy = followBotPosRef.current.y;
+        const sz = followBotPosRef.current.z;
+        const wantCam = new Vector3(sx + THIRD_PERSON_OFFSET.x, sy + THIRD_PERSON_OFFSET.y, sz + THIRD_PERSON_OFFSET.z);
+        const wantTgt = new Vector3(sx, sy + THIRD_PERSON_LOOK_AT_Y, sz);
 
         const isRotating = leftMouseDownRef.current;
         const keepUserAngle = userHasRotatedRef.current;

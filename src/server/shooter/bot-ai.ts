@@ -31,6 +31,7 @@ import {
   // Bot AI tuning constants
   BOT_MELEE_RANGE,
   BOT_KNIFE_RUSH_RADIUS,
+  BOT_KITE_DIST,
   BOT_OBSTACLE_LOOKAHEAD,
   BOT_STUCK_CHECK_INTERVAL_MS,
   BOT_STUCK_DISTANCE_THRESHOLD,
@@ -290,7 +291,7 @@ export class BotBrain {
         // Commit to getting the gun
         this.goalCommitment = { type: 'gun', until: now + 2500, targetId: nearestPickup!.id };
 
-      // Priority 2: Has gun, enemy detected
+      // Priority 2: Has gun, enemy detected — shoot and kite to avoid melee
       } else if (hasGun && enemyDetected && target) {
         aimAngleDeg = target.angleDeg;
 
@@ -303,7 +304,10 @@ export class BotBrain {
           aimAngleDeg = target.angleDeg + noiseDeg;
         }
 
-        if (target.distance > mods.preferredDist * 0.9) {
+        // Kite backward when enemy is close so gun bot maintains range and doesn't get knifed
+        if (target.distance < BOT_KITE_DIST) {
+          moveAngleDeg = target.angleDeg + 180;
+        } else if (target.distance > mods.preferredDist * 0.9) {
           moveAngleDeg = target.angleDeg;
         } else {
           moveAngleDeg = target.angleDeg + 72 * this.strafeDir;

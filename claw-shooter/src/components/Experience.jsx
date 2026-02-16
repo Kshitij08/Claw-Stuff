@@ -102,7 +102,11 @@ const PERSONALITY_COLORS = {
 /** Single server-driven player character with damage flash and personality display. */
 function ServerPlayer({ player, prevPosRef, shots = [], hits = [] }) {
   const groupRef = useRef();
-  const damageFlashRef = useRef(0); // countdown for red flash
+  const damageFlashRef = useRef(0);
+  const muzzleFlashTimeRef = useRef(0);
+  const damageLightRef = useRef();
+  const muzzleLightRef = useRef();
+  const prevWasHitRef = useRef(false);
 
   // Track whether this player is moving (for animation)
   const isMoving = useMemo(() => {
@@ -117,11 +121,10 @@ function ServerPlayer({ player, prevPosRef, shots = [], hits = [] }) {
     prevPosRef.current = { x: player.x, z: player.z };
   });
 
-  // Trigger damage flash when this player is hit
+  // Trigger damage flash when this player is hit (effect runs once per hit)
   const wasHit = hits.some((h) => h && h.victimId === player.id);
-  useEffect(() => {
-    if (wasHit) damageFlashRef.current = 0.3; // 300ms flash
-  }, [wasHit, hits]);
+  if (wasHit && !prevWasHitRef.current) damageFlashRef.current = 0.3;
+  prevWasHitRef.current = !!wasHit;
 
   // Server sends feet-level Y; character model has internal +FEET_OFFSET so it stands on this point
   const feetY = (player.y ?? 0);
@@ -141,6 +144,17 @@ function ServerPlayer({ player, prevPosRef, shots = [], hits = [] }) {
     // Fade damage flash
     if (damageFlashRef.current > 0) {
       damageFlashRef.current = Math.max(0, damageFlashRef.current - delta);
+    }
+    if (damageLightRef.current) {
+      damageLightRef.current.intensity = damageFlashRef.current * 15;
+    }
+
+    // Muzzle flash: when any shot from this player exists, show brief flash then decay (avoids flicker)
+    const hasShot = shots.some((s) => s && s.shooterId === player.id);
+    if (hasShot) muzzleFlashTimeRef.current = Math.max(muzzleFlashTimeRef.current, 0.12);
+    if (muzzleFlashTimeRef.current > 0) muzzleFlashTimeRef.current = Math.max(0, muzzleFlashTimeRef.current - delta);
+    if (muzzleLightRef.current) {
+      muzzleLightRef.current.intensity = muzzleFlashTimeRef.current > 0 && player.alive ? 8 : 0;
     }
   });
 
@@ -170,25 +184,23 @@ function ServerPlayer({ player, prevPosRef, shots = [], hits = [] }) {
         />
       </group>
 
-      {/* Damage flash: red point light that fades quickly when hit */}
-      {damageFlashRef.current > 0 && (
-        <pointLight
-          position={[0, FEET_OFFSET + 1, 0]}
-          color="#ff0000"
-          intensity={damageFlashRef.current * 15}
-          distance={4}
-        />
-      )}
+      {/* Damage flash: always mounted, intensity updated in useFrame to avoid flicker */}
+      <pointLight
+        ref={damageLightRef}
+        position={[0, FEET_OFFSET + 1, 0]}
+        color="#ff0000"
+        intensity={0}
+        distance={4}
+      />
 
-      {/* Muzzle flash: brief bright light when shooting */}
-      {recentlyShot && player.alive && (
-        <pointLight
-          position={[0, FEET_OFFSET + 1.5, 0.5]}
-          color={BULLET_TRAIL_COLOR[player.weapon] || "#ffff00"}
-          intensity={8}
-          distance={5}
-        />
-      )}
+      {/* Muzzle flash: always mounted, intensity updated in useFrame to avoid flicker */}
+      <pointLight
+        ref={muzzleLightRef}
+        position={[0, FEET_OFFSET + 1.5, 0.5]}
+        color={BULLET_TRAIL_COLOR[player.weapon] || "#ffff00"}
+        intensity={0}
+        distance={5}
+      />
 
       {/* Name + weapon + health billboard HUD */}
       {player.alive && (

@@ -45,8 +45,8 @@ export interface WeaponStats {
 export const WEAPON_STATS: Record<WeaponType, WeaponStats> = {
   [WEAPON_TYPES.KNIFE]: {
     type: WEAPON_TYPES.KNIFE,
-    damage: 25,
-    fireRate: 600,
+    damage: 22,
+    fireRate: 650,
     range: 2,
     spread: 0,
     ammo: null,
@@ -55,10 +55,10 @@ export const WEAPON_STATS: Record<WeaponType, WeaponStats> = {
   },
   [WEAPON_TYPES.PISTOL]: {
     type: WEAPON_TYPES.PISTOL,
-    damage: 15,
-    fireRate: 500,
+    damage: 18,
+    fireRate: 450,
     range: 50,
-    spread: 0.02,
+    spread: 0.015,
     ammo: 10,
     pellets: 1,
     isMelee: false,
@@ -171,9 +171,15 @@ export const WEAPON_TIER: Record<WeaponType, number> = {
   [WEAPON_TYPES.ASSAULT_RIFLE]: 3,
 };
 
+// ── Spawn / floor ───────────────────────────────────────────────────
+/** Subtract this from min(spawn Y) so bots spawn on the ground, not floating. */
+export const SPAWN_FLOOR_Y_OFFSET = 1.2;
+
 // ── Bot AI tuning constants ─────────────────────────────────────────
 export const BOT_MELEE_RANGE = 3.0;
 export const BOT_KNIFE_RUSH_RADIUS = 15;
+/** When a gun bot has enemy closer than this, kite backward (retreat) to maintain range. */
+export const BOT_KITE_DIST = 10;
 export const BOT_OBSTACLE_LOOKAHEAD = 3;
 export const BOT_LOS_RAY_HEIGHT = 1.3;
 export const BOT_STUCK_CHECK_INTERVAL_MS = 300;

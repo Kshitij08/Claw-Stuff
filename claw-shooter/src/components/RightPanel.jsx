@@ -25,9 +25,11 @@ export function RightPanel() {
 
   const players = gameState?.players ?? [];
   const timeRemaining = gameState?.timeRemaining ?? 0;
-  const isSpectatorMode = true; // This UI is spectator-only
 
   const aliveCount = players.filter((p) => p.alive && !p.eliminated).length;
+
+  // Spectator UI always shows match state from server
+  const isSpectatorMode = true;
 
   // Sort by survival time (descending)
   const leaderboardEntries = [...players]
@@ -36,7 +38,6 @@ export function RightPanel() {
       id: p.id,
       name: p.name,
       survivalSeconds: p.survivalTime ?? 0,
-      score: p.score ?? 0,
       kills: p.kills ?? 0,
       deaths: p.deaths ?? 0,
       lives: p.lives ?? 3,
@@ -53,7 +54,7 @@ export function RightPanel() {
   }, [gamePhase]);
 
   const phaseClass =
-    isSpectatorMode || gamePhase === "playing"
+    gamePhase === "playing"
       ? "match-phase phase-active"
       : gamePhase === "lobby"
         ? "match-phase phase-lobby"
@@ -119,14 +120,14 @@ export function RightPanel() {
                         {entry.name}
                       </span>
                       <span className="text-[#a3e635] font-mono tabular-nums text-xs whitespace-nowrap flex-shrink-0">
-                        {isSpectatorMode ? `Score ${entry.score ?? 0}` : formatSeconds(entry.survivalSeconds)}
+                        {formatSeconds(entry.survivalSeconds)}
                       </span>
                     </div>
                     <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-[10px] text-slate-400">
                       <span>K: {entry.kills}</span>
                       <span>D: {entry.deaths}</span>
                       <span>Lives: {entry.lives}</span>
-                      {!isSpectatorMode && <span className="truncate">{weaponLabel}{weaponAmmo}</span>}
+                      <span className="truncate">{weaponLabel}{weaponAmmo}</span>
                     </div>
                   </button>
                 );

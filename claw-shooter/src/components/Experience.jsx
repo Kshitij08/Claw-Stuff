@@ -151,6 +151,12 @@ export const Experience = ({ downgradedPerformance = false }) => {
     const newHealth = currentHealth - damage;
     victim.state.setState("lastDamageTime", Date.now());
     if (newHealth <= 0) {
+      const aliveSince = victim.state.getState?.("aliveSince") ?? Date.now();
+      victim.state.setState(
+        "survivalTime",
+        (victim.state.getState?.("survivalTime") ?? victim.state.state?.survivalTime ?? 0) +
+          (Date.now() - aliveSince) / 1000
+      );
       victim.state.setState("dead", true);
       victim.state.setState("deaths", (victim.state.state?.deaths || 0) + 1);
       victim.state.setState("health", 0);

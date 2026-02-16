@@ -14,6 +14,7 @@
     "backup:db": "tsx scripts/backup-db.ts",
     "normalize-winner-names": "tsx scripts/normalize-winner-names.ts",
     "house-bots": "node scripts/run-house-bots.js",
+    "shooter-house-bots": "node scripts/run-shooter-house-bots.js",
     "upload-nft-images": "tsx scripts/upload-nft-images-to-r2.ts",
     "upload-nft-metadata": "tsx scripts/upload-nft-metadata-to-r2.ts",
     "sample-nft-image": "tsx scripts/generate-sample-nft-image.ts"

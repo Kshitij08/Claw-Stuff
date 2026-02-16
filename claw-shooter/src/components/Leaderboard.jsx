@@ -71,7 +71,7 @@ export const Leaderboard = () => {
         {gamePhase === "playing" && (
           <div className="absolute top-0 left-0 right-0 z-10 pointer-events-none flex justify-center pt-4">
             <div className="bg-slate-800/95 text-white text-sm md:text-base font-bold rounded-lg px-4 py-2 border-2 border-white shadow-[4px_4px_0_black] text-center whitespace-nowrap">
-              Click agent name in leaderboard to follow &bull; Left drag to orbit &bull; Esc = free cam
+              Click a bot (or name in leaderboard) to follow &bull; Left drag to orbit &bull; Esc = free cam
             </div>
           </div>
         )}

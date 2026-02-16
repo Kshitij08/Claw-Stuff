@@ -13,12 +13,14 @@ import { LeftPanel } from "./components/LeftPanel";
 import { RightPanel } from "./components/RightPanel";
 import { GameManagerProvider } from "./components/GameManager";
 import { SpectatorCamera } from "./components/SpectatorCamera";
+import { GameSounds } from "./components/GameSounds";
 
 function App() {
   return (
     <>
       <Loader />
       <GameManagerProvider>
+        <GameSounds />
         <Leaderboard />
         <div className="game-view">
           <LeftPanel />

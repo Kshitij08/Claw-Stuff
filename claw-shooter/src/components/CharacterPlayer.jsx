@@ -16,16 +16,16 @@ function getModelPath(character) {
 }
 
 /**
- * G_1.glb animations → game state.
- * (From G_1.glb: Death, Idle, Idle_Shoot, Run, Run_Shoot.)
- * Death: play once and clamp.
+ * G_1.glb (and G_2..G_10) use the same animation names for all bot skins.
+ * Common clip names: Death, Idle, Idle_Shoot, Run, Run_Shoot, Run_Gun, Jump_Idle.
+ * Death: play once and clamp; mesh stays visible. Run_Gun = Run_Shoot fallback.
  */
 const ANIMATION_MAP = {
-  Idle: ["Idle"],
+  Idle: ["Idle", "Jump_Idle"],
   Run: ["Run"],
-  Idle_Shoot: ["Idle_Shoot", "Idle_Shoot ", "Run_Shoot"],
-  Run_Shoot: ["Run_Shoot"],
-  Death: ["Death", "death"],
+  Idle_Shoot: ["Idle_Shoot", "Idle_Shoot "],
+  Run_Shoot: ["Run_Shoot", "Run_Gun"],
+  Death: ["Death", "death", "Death "],
 };
 
 /**

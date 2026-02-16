@@ -35,6 +35,7 @@ import {
   ARENA_MAX_X,
   ARENA_MIN_Z,
   ARENA_MAX_Z,
+  ARENA_MIN_Y,
   MIN_DISTANCE_GUN_FROM_GUN,
   BULLET_RADIUS,
   BULLET_SPEED,
@@ -185,22 +186,7 @@ export class ShooterEngine {
     if (!this.match) return null;
     if (this.match.players.has(playerId)) return null;
 
-    const spawnPoints = this.mapGeometry.spawnPoints;
-    const alivePlayers = [...this.match.players.values()].filter((p) => p.alive);
-    const pickups = this.match.pickups.filter((p) => !p.taken).map((p) => ({ x: p.x, y: p.y, z: p.z }));
-    const occupied = getOccupiedSpawnIndices(spawnPoints, alivePlayers, pickups);
-
-    let spawn = pickUnoccupiedSpawnPoint(spawnPoints, occupied) ?? null;
-    if (!spawn && spawnPoints.length > 0) {
-      spawn = pickSpawnPoint(spawnPoints, alivePlayers, occupied);
-    }
-    if (!spawn) {
-      const randomEmpty = randomArenaPointInEmptySpace(
-        (x, y, z, r) => this.isPointInEmptySpace(x, y, z, r),
-        PLAYER_CAPSULE_RADIUS + 0.2,
-      );
-      spawn = randomEmpty ?? randomArenaPoint();
-    }
+    const spawn = this.getValidSpawnPoint();
 
     const player = createPlayer(playerId, name, spawn, strategyTag);
     this.match.players.set(playerId, player);
@@ -485,6 +471,42 @@ export class ShooterEngine {
     return !hitsMap;
   }
 
+  /** Check if a spawn point is valid (capsule at that position does not intersect map). */
+  private isSpawnInEmptySpace(spawn: SpawnPoint): boolean {
+    const centerY = spawn.y + PLAYER_CAPSULE_HALF_HEIGHT + PLAYER_CAPSULE_RADIUS;
+    return this.isPointInEmptySpace(spawn.x, centerY, spawn.z, PLAYER_CAPSULE_RADIUS + 0.2);
+  }
+
+  /**
+   * Get a spawn point that is both unoccupied and not inside the map mesh.
+   * Ensures no bots spawn inside geometry.
+   */
+  private getValidSpawnPoint(): SpawnPoint {
+    const spawnPoints = this.mapGeometry.spawnPoints;
+    const alivePlayers = [...this.match!.players.values()].filter((p) => p.alive);
+    const pickups = this.match!.pickups.filter((p) => !p.taken).map((p) => ({ x: p.x, y: p.y, z: p.z }));
+    const occupied = getOccupiedSpawnIndices(spawnPoints, alivePlayers, pickups);
+
+    for (let i = 0; i < spawnPoints.length; i++) {
+      if (occupied.has(i)) continue;
+      const spawn = spawnPoints[i];
+      if (this.isSpawnInEmptySpace(spawn)) return spawn;
+    }
+    for (let i = 0; i < spawnPoints.length; i++) {
+      if (!occupied.has(i)) continue;
+      const spawn = spawnPoints[i];
+      if (this.isSpawnInEmptySpace(spawn)) return spawn;
+    }
+
+    const randomEmpty = randomArenaPointInEmptySpace(
+      (x, y, z, r) => this.isPointInEmptySpace(x, y, z, r),
+      PLAYER_CAPSULE_RADIUS + 0.2,
+      80,
+    );
+    if (randomEmpty) return randomEmpty;
+    return randomArenaPoint();
+  }
+
   private syncPositions(): void {
     if (!this.match) return;
 
@@ -492,14 +514,34 @@ export class ShooterEngine {
       const player = this.match.players.get(playerId);
       if (!player) continue;
 
+      // Skip dead players: their body is parked at (1000,-100,1000) — keep last alive position
+      if (!player.alive) continue;
+
       const pos = body.rigidBody.translation();
       player.x = pos.x;
       player.y = pos.y;
       player.z = pos.z;
 
-      // Clamp to arena bounds (safety net)
-      player.x = Math.max(ARENA_MIN_X, Math.min(ARENA_MAX_X, player.x));
-      player.z = Math.max(ARENA_MIN_Z, Math.min(ARENA_MAX_Z, player.z));
+      const skinBound = PLAYER_CAPSULE_RADIUS + 0.15;
+      const outOfHorizontal =
+        pos.x < ARENA_MIN_X + skinBound ||
+        pos.x > ARENA_MAX_X - skinBound ||
+        pos.z < ARENA_MIN_Z + skinBound ||
+        pos.z > ARENA_MAX_Z - skinBound;
+      const outOfVertical = pos.y < ARENA_MIN_Y;
+      const outOfBounds = outOfHorizontal || outOfVertical;
+
+      if (outOfBounds) {
+        const spawn = this.getValidSpawnPoint();
+        const bodyY = spawn.y + PLAYER_CAPSULE_HALF_HEIGHT + PLAYER_CAPSULE_RADIUS;
+        player.x = spawn.x;
+        player.y = spawn.y;
+        player.z = spawn.z;
+        body.rigidBody.setNextKinematicTranslation({ x: spawn.x, y: bodyY, z: spawn.z });
+      } else {
+        player.x = Math.max(ARENA_MIN_X, Math.min(ARENA_MAX_X, player.x));
+        player.z = Math.max(ARENA_MIN_Z, Math.min(ARENA_MAX_Z, player.z));
+      }
     }
   }
 
@@ -552,8 +594,11 @@ export class ShooterEngine {
     }
 
     if (player.ammo !== null && player.ammo <= 0) {
+      const depletedGun = player.weapon;
       player.weapon = WEAPON_TYPES.KNIFE;
       player.ammo = null;
+      // Re-enter the depleted gun into the economy as a fresh pickup
+      this.addPickup(depletedGun);
     }
   }
 
@@ -660,9 +705,9 @@ export class ShooterEngine {
       const dist = Math.sqrt(dx * dx + dz * dz);
       if (dist > stats.range + 0.5) continue;
 
-      // Check roughly in front (dot product > 0)
+      // Check roughly in front (dot product; allow slight behind for desync)
       const dot = dx * facingX + dz * facingZ;
-      if (dot < 0 && dist > 1) continue;
+      if (dot < -0.35 && dist > 1) continue;
 
       if (dist < closestDist) {
         closestDist = dist;
@@ -672,11 +717,12 @@ export class ShooterEngine {
 
     if (closestVictim) {
       // Raycast to check line of sight (can't knife through walls)
-      const origin = { x: player.x, y: player.y + 1.0, z: player.z };
+      const origin = { x: player.x, y: player.y, z: player.z };
       const dx = closestVictim.x - player.x;
       const dz = closestVictim.z - player.z;
       const dist = Math.sqrt(dx * dx + dz * dz);
-      const direction = { x: dx / dist, y: 0, z: dz / dist };
+      const dirNorm = dist > 1e-6 ? dist : 1;
+      const direction = { x: dx / dirNorm, y: 0, z: dz / dirNorm };
       const ray = new this.rapier.Ray(origin, direction);
 
       const hit = this.world.castRay(
@@ -689,12 +735,16 @@ export class ShooterEngine {
         this.playerBodies.get(player.id)?.rigidBody,
       );
 
-      // If ray hits something closer than the victim, it's a wall
-      if (hit && hit.timeOfImpact < dist * 0.9) {
-        // Check it's not the victim's own collider
+      // Block only if we hit the map (fixed body) before the victim
+      if (hit) {
         const victimBody = this.playerBodies.get(closestVictim.id);
-        if (!victimBody || hit.collider.handle !== victimBody.collider.handle) {
+        const hitBody = hit.collider.parent();
+        const hitVictim = victimBody && hit.collider.handle === victimBody.collider.handle;
+        if (!hitVictim && hitBody && hitBody.isFixed()) {
           return; // Blocked by wall
+        }
+        if (!hitVictim && hitBody && !hitBody.isFixed()) {
+          return; // Hit another player (not our target) — don't damage
         }
       }
 
@@ -772,22 +822,7 @@ export class ShooterEngine {
       if (player.alive || player.eliminated || !player.diedAt) continue;
       if (now - player.diedAt < RESPAWN_DELAY_MS) continue;
 
-      const spawnPoints = this.mapGeometry.spawnPoints;
-      const alivePlayers = [...this.match.players.values()].filter((p) => p.alive);
-      const pickups = this.match.pickups.filter((p) => !p.taken).map((p) => ({ x: p.x, y: p.y, z: p.z }));
-      const occupied = getOccupiedSpawnIndices(spawnPoints, alivePlayers, pickups);
-
-      let spawn = pickRandomUnoccupiedSpawnPoint(spawnPoints, occupied) ?? null;
-      if (!spawn && spawnPoints.length > 0) {
-        spawn = pickSpawnPoint(spawnPoints, alivePlayers, occupied);
-      }
-      if (!spawn) {
-        const randomEmpty = randomArenaPointInEmptySpace(
-          (x, y, z, r) => this.isPointInEmptySpace(x, y, z, r),
-          PLAYER_CAPSULE_RADIUS + 0.2,
-        );
-        spawn = randomEmpty ?? randomArenaPoint();
-      }
+      const spawn = this.getValidSpawnPoint();
 
       if (respawnPlayer(player, spawn)) {
         const body = this.playerBodies.get(player.id);
@@ -826,7 +861,9 @@ export class ShooterEngine {
     const alivePlayers = [...this.match.players.values()].filter((p) => p.alive);
     const pickupsSoFar = this.match.pickups.map((p) => ({ x: p.x, y: p.y, z: p.z }));
 
-    for (let i = 0; i < INITIAL_WEAPON_PICKUPS; i++) {
+    // Spawn one gun per bot so total guns == player count at all times
+    const pickupCount = Math.max(INITIAL_WEAPON_PICKUPS, this.match.players.size);
+    for (let i = 0; i < pickupCount; i++) {
       const occupied = getOccupiedSpawnIndices(spawnPoints, alivePlayers, pickupsSoFar);
       let x: number; let y: number; let z: number;
 

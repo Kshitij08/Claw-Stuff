@@ -4,6 +4,8 @@ export const ARENA_MAX_X = 45;
 export const ARENA_MIN_Z = -45;
 export const ARENA_MAX_Z = 45;
 export const ARENA_SIZE = 90; // maxX - minX
+/** Minimum valid Y (capsule center). Below this = fell off map → respawn. Floor is at -10. */
+export const ARENA_MIN_Y = -9;
 
 // ── Player ─────────────────────────────────────────────────────────
 export const PLAYER_CAPSULE_RADIUS = 0.5;
@@ -16,6 +18,9 @@ export const RESPAWN_DELAY_MS = 2000;
 export const MIN_SPAWN_SEPARATION = 4;
 
 // ── Weapons ────────────────────────────────────────────────────────
+// Gun types: pistol, smg, shotgun, assault_rifle. Each has damage, fireRate (ms),
+// range (m), spread (rad), ammo count, pellets (shotgun = 5). Shooting pattern
+// and ammo consumption are in the engine (handleShoot uses stats.pellets + spread).
 export const WEAPON_TYPES = {
   KNIFE: 'knife',
   PISTOL: 'pistol',
@@ -99,7 +104,7 @@ export const GUN_TYPES: WeaponType[] = [
 
 // ── Pickups ────────────────────────────────────────────────────────
 export const INITIAL_WEAPON_PICKUPS = 5;
-export const PICKUP_RADIUS = 1.5; // metres – agent must be this close to pick up
+export const PICKUP_RADIUS = 2.0; // metres – agent must be this close to pick up (generous to avoid running past)
 export const MIN_DISTANCE_GUN_FROM_PLAYER_SPAWN = 6;
 export const MIN_DISTANCE_GUN_FROM_GUN = 3;
 

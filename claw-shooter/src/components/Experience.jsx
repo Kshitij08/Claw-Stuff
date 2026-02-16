@@ -15,13 +15,20 @@ import { MapVisual, MapLevelDebugColliders, useMapBounds, useSpawnPoints } from 
 import { useEffect, useRef, useMemo } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Vector3 } from "three";
+
+/** Bullet color by gun type (also used for bloom via emissive). */
+const BULLET_COLOR_BY_WEAPON = {
+  pistol: "#facc15",
+  smg: "#22d3ee",
+  shotgun: "#f97316",
+  assault_rifle: "#a855f7",
+  knife: "#94a3b8",
+};
 import { CharacterPlayer } from "./CharacterPlayer";
 import { WeaponPickup } from "./WeaponPickup";
 import { BotClickCapture } from "./BotClickCapture";
 import { useGameManager } from "./GameManager";
 import { Billboard, Text } from "@react-three/drei";
-
-const BG_MUSIC_URL = "/claw-shooter/sounds/bg music.mp3";
 
 // Match server capsule and arena (for debug colliders and grounding)
 const CAPSULE_HALF_HEIGHT = 0.7;
@@ -33,7 +40,7 @@ const ARENA_MIN_X = -45;
 const ARENA_MAX_X = 45;
 const ARENA_MIN_Z = -45;
 const ARENA_MAX_Z = 45;
-const DEBUG_COLLIDERS = true;
+const DEBUG_COLLIDERS = false;
 /** Extra Y offset: character is drawn this many units below server capsule center. */
 const CHARACTER_Y_EXTRA_OFFSET = 1.75;
 /** Debug capsule: 50% longer than server capsule. */
@@ -45,15 +52,16 @@ const CHARACTER_AND_CAPSULE_DOWN_EXTRA = 0.15;
 /** Scale factor for character and debug capsule (0.5 = 50%). */
 const CHARACTER_AND_CAPSULE_SCALE = 1;
 
-/** Determine animation state from server player data. */
-function getAnimation(player, isMoving) {
-  if (!player.alive) return "Death";
+/** Determine animation state from server player data (aligned with G_1.glb / Character_Soldier clips). */
+function getAnimation(player, isMoving, recentlyShot) {
+  if (player.alive === false) return "Death";
+  if (recentlyShot) return isMoving ? "Run_Shoot" : "Idle_Shoot";
   if (isMoving) return "Run";
   return "Idle";
 }
 
 /** Single server-driven player character. */
-function ServerPlayer({ player, prevPosRef }) {
+function ServerPlayer({ player, prevPosRef, shots = [] }) {
   const groupRef = useRef();
 
   // Track whether this player is moving (for animation)
@@ -86,14 +94,16 @@ function ServerPlayer({ player, prevPosRef }) {
     groupRef.current.rotation.y += (targetRotY - groupRef.current.rotation.y) * Math.min(1, 10 * delta);
   });
 
-  const animation = getAnimation(player, isMoving);
+  const recentlyShot = shots.some((s) => s && s.shooterId === player.id);
+  const animation = getAnimation(player, isMoving, recentlyShot);
   const character = player.character || "G_1";
 
-  // Hide eliminated players completely
-  if (player.eliminated) return null;
-
   return (
-    <group ref={groupRef} position={[player.x, feetY, player.z]}>
+    <group
+      ref={groupRef}
+      position={[player.x, feetY, player.z]}
+      userData={{ botId: player.id }}
+    >
       {/* Character model; offset up so capsule center is at (x, centerY, z) */}
       <group position={[0, FEET_OFFSET, 0]} scale={2 * CHARACTER_AND_CAPSULE_SCALE}>
         <CharacterPlayer
@@ -102,7 +112,7 @@ function ServerPlayer({ player, prevPosRef }) {
           weapon={player.weapon || "knife"}
         />
       </group>
-      {/* Name + health billboard (above character) */}
+      {/* Name + health billboard (above character when alive); dead bots keep mesh visible with Death animation */}
       {player.alive && (
         <Billboard position={[0, FEET_OFFSET + 3.8, 0]}>
           <Text
@@ -136,21 +146,7 @@ function ServerPlayer({ player, prevPosRef }) {
 
 export const Experience = ({ downgradedPerformance = false }) => {
   const { gameState, shots, gamePhase } = useGameManager();
-  const bgMusicRef = useRef(null);
   const prevPosRefs = useRef(new Map());
-
-  // Background music
-  useEffect(() => {
-    const audio = new Audio(BG_MUSIC_URL);
-    audio.loop = true;
-    audio.volume = 0.5;
-    bgMusicRef.current = audio;
-    audio.play().catch(() => {});
-    return () => {
-      audio.pause();
-      bgMusicRef.current = null;
-    };
-  }, []);
 
   const players = gameState?.players ?? [];
   const pickups = gameState?.pickups ?? [];
@@ -180,13 +176,22 @@ export const Experience = ({ downgradedPerformance = false }) => {
         />
       ))}
 
-      {/* Physical bullet objects (small spheres) */}
-      {bullets.map((b) => (
-        <mesh key={b.id} position={[b.x, b.y, b.z]}>
-          <sphereGeometry args={[BULLET_RADIUS * 2, 8, 6]} />
-          <meshBasicMaterial color="#ffff00" />
-        </mesh>
-      ))}
+      {/* Physical bullets: color-coded by gun, emissive for bloom */}
+      {bullets.map((b) => {
+        const weapon = b.weapon || "pistol";
+        const color = BULLET_COLOR_BY_WEAPON[weapon] ?? BULLET_COLOR_BY_WEAPON.pistol;
+        return (
+          <mesh key={b.id} position={[b.x, b.y, b.z]}>
+            <sphereGeometry args={[BULLET_RADIUS * 2, 12, 8]} />
+            <meshStandardMaterial
+              color={color}
+              emissive={color}
+              emissiveIntensity={1.8}
+              toneMapped={false}
+            />
+          </mesh>
+        );
+      })}
 
       {/* Player characters */}
       {players.map((player) => (
@@ -194,6 +199,7 @@ export const Experience = ({ downgradedPerformance = false }) => {
           key={player.id}
           player={player}
           prevPosRef={prevPosRefs.current.get(player.id)}
+          shots={shots}
         />
       ))}
 

@@ -15,10 +15,6 @@ import { createNftRoutes } from './nft/routes.js';
 import { setEmitter } from './betting/service.js';
 import { getProceduralBodyBuffer, getProceduralEyesBuffer, getProceduralMouthBuffer } from './snakeGenerator.js';
 
-// Shooter game imports
-import { ShooterMatchManager } from './shooter/match.js';
-import { createShooterRoutes } from './shooter/routes.js';
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 

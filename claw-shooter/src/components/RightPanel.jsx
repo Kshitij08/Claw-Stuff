@@ -25,6 +25,7 @@ export function RightPanel() {
 
   const players = gameState?.players ?? [];
   const timeRemaining = gameState?.timeRemaining ?? 0;
+  const isSpectatorMode = true; // This UI is spectator-only
 
   const aliveCount = players.filter((p) => p.alive && !p.eliminated).length;
 
@@ -35,6 +36,7 @@ export function RightPanel() {
       id: p.id,
       name: p.name,
       survivalSeconds: p.survivalTime ?? 0,
+      score: p.score ?? 0,
       kills: p.kills ?? 0,
       deaths: p.deaths ?? 0,
       lives: p.lives ?? 3,
@@ -43,22 +45,6 @@ export function RightPanel() {
       eliminated: p.eliminated,
       alive: p.alive,
     }));
-
-  const leaderboardEntries = isSpectatorMode
-    ? spectatorMatchState.leaderboard.map((e, i) => ({
-        id: e.id,
-        player: { id: e.id },
-        name: e.name,
-        survivalSeconds: 0,
-        kills: e.kills,
-        deaths: 0,
-        lives: e.lives,
-        weapon: "knife",
-        ammo: null,
-        eliminated: !e.alive,
-        color: "#888",
-      }))
-    : playroomLeaderboardEntries;
 
   useEffect(() => {
     if (gamePhase !== "playing") return;

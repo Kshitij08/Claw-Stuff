@@ -23,7 +23,7 @@ const RAY_ORIGIN_Y = 1.3;
 const LOS_THRESHOLD = 0.98;
 const STALEMATE_CHECK_INTERVAL = 300;
 const STALEMATE_DIST_DELTA = 0.35;
-const STALEMATE_TIME_THRESHOLD = 500;
+const STALEMATE_TIME_THRESHOLD = 1000; // 1 s stuck → change target
 const TARGET_PERSISTENCE_MS = 0;
 const STUCK_RECOVERY_DURATIONS = [500, 900, 1400];
 const RECOVERY_QUADRANT_AVOID_MS = 1500;
@@ -31,7 +31,7 @@ const RECOVERY_QUADRANT_AVOID_MS = 1500;
 /* ── Tuning constants ──────────────────────────────────────────── */
 const BASE_MOVEMENT_SPEED = 260;
 const MELEE_RANGE = 2.0;
-const KNIFE_RUSH_DECISION_RADIUS = 30;
+const KNIFE_RUSH_DECISION_RADIUS = 15; // within this range, always pursue/melee; don't go for gun first
 const RESPAWN_DELAY = 2000;
 const OCCUPIED_RADIUS = 3;
 /** Min distance (m) from death position when choosing respawn so we never respawn on the spot */
@@ -142,8 +142,8 @@ function evaluateMatchup(myState, enemyEntry, myPos) {
 }
 
 /**
- * Pick target: zero hesitation. Nearest or weakest (when healthy).
- * excludeId: when in stalemate with current target, switch to another bot (better odds).
+ * Pick target: nearest first; among similar distance prefer lower health and inferior weapon.
+ * excludeId: when in stalemate or stuck with current target, switch to another bot.
  */
 function selectTarget(allEnemies, myHealth, excludeId = null) {
   let list = allEnemies;
@@ -151,17 +151,15 @@ function selectTarget(allEnemies, myHealth, excludeId = null) {
     list = list.filter((e) => e.id !== excludeId);
   }
   if (!list.length) return null;
-  const preferWeak = myHealth > 40;
-  if (preferWeak) {
-    const sorted = [...list].sort((a, b) => {
-      const healthA = a.health ?? 100;
-      const healthB = b.health ?? 100;
-      if (healthA !== healthB) return healthA - healthB;
-      return a.distance - b.distance;
-    });
-    return sorted[0];
-  }
-  return list[0];
+  const myTier = (e) => (WEAPON_TIER[e.weapon] ?? 0);
+  const sorted = [...list].sort((a, b) => {
+    if (a.distance !== b.distance) return a.distance - b.distance;
+    const healthA = a.health ?? 100;
+    const healthB = b.health ?? 100;
+    if (healthA !== healthB) return healthA - healthB;
+    return (myTier(a) - myTier(b)); // lower weapon tier = weaker = prefer
+  });
+  return sorted[0];
 }
 
 /* ── Personality definitions ───────────────────────────────────── *
@@ -173,35 +171,35 @@ function selectTarget(allEnemies, myHealth, excludeId = null) {
  */
 const PERSONALITY_MODS = {
   Aggressive: {
-    detectRadius: 32,
+    detectRadius: 75,
     preferredDist: 5,
     speedMult: 1.25,
     fleeHealth: 0,
     accuracy: 0.82,
   },
   Cautious: {
-    detectRadius: 32,
+    detectRadius: 75,
     preferredDist: 6,
     speedMult: 1.2,
     fleeHealth: 0,
     accuracy: 0.75,
   },
   Sniper: {
-    detectRadius: 36,
+    detectRadius: 80,
     preferredDist: 10,
     speedMult: 1.15,
     fleeHealth: 0,
     accuracy: 0.92,
   },
   Rusher: {
-    detectRadius: 30,
+    detectRadius: 70,
     preferredDist: 3,
     speedMult: 1.4,
     fleeHealth: 0,
     accuracy: 0.68,
   },
   Tactician: {
-    detectRadius: 32,
+    detectRadius: 75,
     preferredDist: 6,
     speedMult: 1.2,
     fleeHealth: 0,
@@ -702,6 +700,11 @@ export const BotController = ({
         stuckAccumRef.current >= STUCK_TIME_THRESHOLD &&
         !recoveryRef.current.active
       ) {
+        /* Stuck for >1 s: switch to another target so we don't keep chasing the same bot */
+        if (nearest?.id && allEnemies.length > 1) {
+          nearest = selectTarget(allEnemies, myHealth, nearest.id);
+          engagementRef.current = { targetId: nearest?.id ?? null, startTime: now, lastDist: nearest?.distance ?? Infinity, lastCheckTime: now };
+        }
         stuckConsecutiveCountRef.current = Math.min(2, stuckConsecutiveCountRef.current + 1);
         const durationIndex = Math.min(stuckConsecutiveCountRef.current, STUCK_RECOVERY_DURATIONS.length - 1);
         const duration = STUCK_RECOVERY_DURATIONS[durationIndex];
@@ -777,7 +780,8 @@ export const BotController = ({
         : nearest.angle + (Math.PI / 2.5) * strafeDirRef.current;
       stateLabel = hasLOSToTarget ? "Idle_Shoot" : "Run";
 
-    } else if (!hasGun && enemyDetected) {
+    } else if (!hasGun && nearest && nearest.distance < KNIFE_RUSH_DECISION_RADIUS) {
+      /* Enemy within knife rush radius: always pursue and melee; don't go for gun first */
       if (nearest.distance <= MELEE_RANGE) {
         lookAngle = nearest.angle;
         if (now - lastMelee.current > KNIFE.fireRate) {
@@ -785,7 +789,21 @@ export const BotController = ({
           onMeleeHit?.(nearest.player.id, state.id, KNIFE.damage);
         }
         stateLabel = "Idle_Shoot";
-      } else if (nearestPickup && nearestPickup.distance < 3 && nearest.distance > 12) {
+      } else {
+        moveAngle = nearest.angle;
+        lookAngle = nearest.angle;
+        stateLabel = "Run";
+      }
+    } else if (!hasGun && enemyDetected) {
+      /* Enemy detected but beyond knife rush radius: still close in (or grab very close pickup only) */
+      if (nearest.distance <= MELEE_RANGE) {
+        lookAngle = nearest.angle;
+        if (now - lastMelee.current > KNIFE.fireRate) {
+          lastMelee.current = now;
+          onMeleeHit?.(nearest.player.id, state.id, KNIFE.damage);
+        }
+        stateLabel = "Idle_Shoot";
+      } else if (nearestPickup && nearestPickup.distance < 3 && nearest.distance > KNIFE_RUSH_DECISION_RADIUS) {
         moveAngle = nearestPickup.angle;
         lookAngle = nearestPickup.angle;
         stateLabel = "Run";

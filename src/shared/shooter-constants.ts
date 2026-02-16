@@ -110,7 +110,7 @@ export const MIN_DISTANCE_GUN_FROM_GUN = 3;
 
 // ── Match ──────────────────────────────────────────────────────────
 export const MATCH_DURATION_MS = 4 * 60 * 1000; // 4 minutes
-export const LOBBY_COUNTDOWN_MS = 15 * 1000;     // 15s after 2nd agent joins
+export const LOBBY_COUNTDOWN_MS = 90 * 1000;     // 90s lobby for betting window
 export const RESULTS_DURATION_MS = 10 * 1000;
 export const MATCH_INTERVAL_MS = 5 * 60 * 1000;
 

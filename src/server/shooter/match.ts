@@ -13,6 +13,12 @@
  *  - When an API agent joins a full match, the lowest-priority AI bot is
  *    removed to make room (API agents always get priority).
  *  - AI bots use the same action pipeline as API agents.
+ *
+ * Betting Integration:
+ *  - All players (AI bots + API agents) are bettable.
+ *  - Betting opens on lobby open (debounced 5s), closes 10s before match start.
+ *  - On match end, betting is resolved. AI bot winners get address(0) so
+ *    their 5% agent share goes to treasury.
  */
 
 import { ShooterEngine } from './engine.js';
@@ -38,11 +44,15 @@ import {
   PERSONALITIES,
   type PersonalityType,
 } from '../../shared/shooter-constants.js';
+import * as bettingService from '../betting/service.js';
+import { recordMatchEnd, recordAgentJoin, ensureMatchExists } from '../db.js';
 
 /** Minimum number of total players (AI + API) to start a match. */
 const MIN_PLAYERS_FOR_MATCH = 2;
 /** Number of AI bots to fill in the arena. */
 const AI_FILL_COUNT = 5;
+/** Close betting this many ms before match start. */
+const BETTING_CLOSE_BUFFER = 10_000;
 
 export class ShooterMatchManager {
   private engine: ShooterEngine;
@@ -52,6 +62,11 @@ export class ShooterMatchManager {
   private lobbyCountdownTimer: NodeJS.Timeout | null = null;
   private resultsTimer: NodeJS.Timeout | null = null;
   private countdownStartsAt = 0;
+
+  // Betting state
+  private bettingCloseTimeout: NodeJS.Timeout | null = null;
+  private bettingOpenTimeout: NodeJS.Timeout | null = null;
+  private bettingOpenedOnChain = false;
 
   // Callbacks for Socket.IO integration
   private onStateUpdateCallback: ((state: ShooterSpectatorState) => void) | null = null;
@@ -129,16 +144,39 @@ export class ShooterMatchManager {
       clearTimeout(this.resultsTimer);
       this.resultsTimer = null;
     }
+    if (this.bettingCloseTimeout) {
+      clearTimeout(this.bettingCloseTimeout);
+      this.bettingCloseTimeout = null;
+    }
+    if (this.bettingOpenTimeout) {
+      clearTimeout(this.bettingOpenTimeout);
+      this.bettingOpenTimeout = null;
+    }
+    this.bettingOpenedOnChain = false;
   }
 
   // ── Lobby ─────────────────────────────────────────────────────────
 
   private openLobby(): void {
+    // Clear betting state from previous match
+    if (this.bettingCloseTimeout) {
+      clearTimeout(this.bettingCloseTimeout);
+      this.bettingCloseTimeout = null;
+    }
+    if (this.bettingOpenTimeout) {
+      clearTimeout(this.bettingOpenTimeout);
+      this.bettingOpenTimeout = null;
+    }
+    this.bettingOpenedOnChain = false;
+
     const matchId = `shooter_${this.nextMatchId++}`;
     this.engine.createMatch(matchId);
     this.registeredPlayers.clear();
     this.botAI.clear();
     this.countdownStartsAt = 0;
+
+    // Ensure the match exists in DB (for betting pool foreign key)
+    ensureMatchExists(matchId).catch(() => {});
 
     // Auto-fill with AI bots
     this.fillWithAIBots();
@@ -147,6 +185,11 @@ export class ShooterMatchManager {
     const match = this.engine.getMatch();
     if (match && match.players.size >= MIN_PLAYERS_FOR_MATCH && !this.lobbyCountdownTimer) {
       this.startLobbyCountdown();
+    }
+
+    // Open betting with all current players (AI bots are already present)
+    if (match && match.players.size >= MIN_PLAYERS_FOR_MATCH) {
+      this.scheduleBettingOpen(match);
     }
 
     console.log(`[ShooterMatchManager] Lobby open: ${matchId} (${this.botAI.size} AI bots)`);
@@ -175,6 +218,46 @@ export class ShooterMatchManager {
     }
 
     console.log(`[ShooterMatchManager] Filled ${slotsToFill} AI bot slots`);
+  }
+
+  /**
+   * Debounced betting open: waits 5s after the last player change before sending
+   * a single openBetting tx with ALL players (AI + API). Resets if a new player
+   * joins within the window to include them.
+   */
+  private scheduleBettingOpen(match: ReturnType<typeof this.engine.getMatch>): void {
+    if (!match) return;
+    const DEBOUNCE_MS = 5_000;
+
+    // Gather all current player names (AI bots + API agents)
+    const allPlayerNames = Array.from(match.players.values()).map(p => {
+      const rp = this.registeredPlayers.get(p.id);
+      return rp?.agentInfo.name ?? p.name;
+    });
+
+    if (!this.bettingOpenedOnChain) {
+      if (this.bettingOpenTimeout) clearTimeout(this.bettingOpenTimeout);
+
+      // Update DB + emit immediately so the UI shows all agents right away
+      bettingService.openBettingForMatch(match.id, allPlayerNames, false).catch(() => {});
+
+      this.bettingOpenTimeout = setTimeout(() => {
+        this.bettingOpenTimeout = null;
+        this.bettingOpenedOnChain = true;
+        // Gather players one final time in case more joined during debounce
+        const finalMatch = this.engine.getMatch();
+        if (!finalMatch) return;
+        const finalNames = Array.from(finalMatch.players.values()).map(p => {
+          const rp = this.registeredPlayers.get(p.id);
+          return rp?.agentInfo.name ?? p.name;
+        });
+        // Update DB with final list, then send single on-chain tx
+        bettingService.openBettingForMatch(finalMatch.id, finalNames, true).catch(() => {});
+      }, DEBOUNCE_MS);
+    } else {
+      // openBetting already sent on-chain – add this agent via addAgents
+      bettingService.addBettingAgent(match.id, allPlayerNames[allPlayerNames.length - 1]).catch(() => {});
+    }
   }
 
   /**
@@ -282,6 +365,15 @@ export class ShooterMatchManager {
       actionCount: 0,
     });
 
+    // Record agent join in DB (best-effort)
+    recordAgentJoin({
+      agentName: agentInfo.name,
+      apiKey,
+      playerId,
+      matchId: match.id,
+      strategyTag,
+    }).catch(() => {});
+
     // If this is the 2nd player in lobby, start countdown
     if (
       (match.phase === 'lobby' || match.phase === 'countdown') &&
@@ -289,6 +381,11 @@ export class ShooterMatchManager {
       !this.lobbyCountdownTimer
     ) {
       this.startLobbyCountdown();
+    }
+
+    // Add agent to betting pool
+    if (match.players.size >= MIN_PLAYERS_FOR_MATCH) {
+      this.scheduleBettingOpen(match);
     }
 
     this.onStatusChangeCallback?.();
@@ -317,8 +414,40 @@ export class ShooterMatchManager {
     this.onLobbyOpenCallback?.(match.id, this.countdownStartsAt);
     this.onStatusChangeCallback?.();
 
+    // Close betting 10s before match starts
+    if (LOBBY_COUNTDOWN_MS > BETTING_CLOSE_BUFFER) {
+      if (this.bettingCloseTimeout) clearTimeout(this.bettingCloseTimeout);
+      this.bettingCloseTimeout = setTimeout(() => {
+        this.bettingCloseTimeout = null;
+        const m = this.engine.getMatch();
+        if (m) bettingService.closeBettingForMatch(m.id).catch(() => {});
+      }, LOBBY_COUNTDOWN_MS - BETTING_CLOSE_BUFFER);
+    }
+
     this.lobbyCountdownTimer = setTimeout(() => {
       this.lobbyCountdownTimer = null;
+
+      // If debounced betting open hasn't fired yet, fire it now
+      if (this.bettingOpenTimeout) {
+        clearTimeout(this.bettingOpenTimeout);
+        this.bettingOpenTimeout = null;
+      }
+      if (!this.bettingOpenedOnChain && match.players.size >= MIN_PLAYERS_FOR_MATCH) {
+        this.bettingOpenedOnChain = true;
+        const allNames = Array.from(match.players.values()).map(p => {
+          const rp = this.registeredPlayers.get(p.id);
+          return rp?.agentInfo.name ?? p.name;
+        });
+        bettingService.openBettingForMatch(match.id, allNames, true).catch(() => {});
+      }
+
+      // Close betting as safety net (idempotent)
+      bettingService.closeBettingForMatch(match.id).catch(() => {});
+      if (this.bettingCloseTimeout) {
+        clearTimeout(this.bettingCloseTimeout);
+        this.bettingCloseTimeout = null;
+      }
+
       this.engine.startMatch(MATCH_DURATION_MS);
       this.onStatusChangeCallback?.();
     }, LOBBY_COUNTDOWN_MS);
@@ -332,6 +461,29 @@ export class ShooterMatchManager {
 
     const leaderboard = this.engine.getLeaderboard();
     const winner = leaderboard.length > 0 ? leaderboard[0] : null;
+
+    // Map display name -> canonical agent name, and agent name -> API key
+    const displayNameToAgent = new Map<string, string>();
+    const agentNameToApiKey = new Map<string, string>();
+    const aiBotIds = new Set(this.botAI.getBotIds());
+
+    for (const player of match.players.values()) {
+      const rp = this.registeredPlayers.get(player.id);
+      const agentName = rp?.agentInfo.name ?? player.name;
+      displayNameToAgent.set(player.name, agentName);
+      if (rp?.apiKey) {
+        agentNameToApiKey.set(agentName, rp.apiKey);
+      }
+    }
+
+    const winnerAgentName = winner ? (displayNameToAgent.get(winner.name) ?? winner.name) : null;
+
+    // Build final scores for DB
+    const finalScoresForDb = leaderboard.map(entry => ({
+      agentName: displayNameToAgent.get(entry.name) ?? entry.name,
+      score: entry.kills,
+      kills: entry.kills,
+    }));
 
     const result: ShooterSpectatorMatchEnd = {
       matchId: match.id,
@@ -350,6 +502,39 @@ export class ShooterMatchManager {
 
     console.log(`[ShooterMatchManager] Match ${match.id} ended. Winner: ${winner?.name ?? 'none'}`);
     this.onMatchEndCallback?.(result);
+
+    // Persist match result to database (best-effort)
+    recordMatchEnd({
+      matchId: match.id,
+      winnerAgentName,
+      endedAt: Date.now(),
+      finalScores: finalScoresForDb,
+    }).catch(() => {});
+
+    // ── Resolve betting ────────────────────────────────────────────────
+    // Detect draws: multiple players with top survival time
+    const topSurvival = leaderboard.length > 0 ? (leaderboard[0].survivalTime ?? 0) : 0;
+    const drawThresholdS = 0.05; // 50ms threshold in seconds
+    const winners = leaderboard.filter(e => Math.abs((e.survivalTime ?? 0) - topSurvival) <= drawThresholdS);
+    const isDraw = winners.length > 1;
+    const winnerAgentNames = winners.map(w => displayNameToAgent.get(w.name) ?? w.name);
+
+    // Look up wallet addresses for winner agents
+    // AI bots have no apiKey, so they get address(0) -> 5% goes to treasury
+    const winnerWalletPromises = winnerAgentNames.map(name => {
+      const apiKey = agentNameToApiKey.get(name);
+      if (!apiKey) return Promise.resolve(null); // AI bot -> null -> address(0)
+      return bettingService.getAgentWallet(name, apiKey).catch(() => null);
+    });
+    Promise.all(winnerWalletPromises).then(wallets => {
+      const winnerAgentWallets = wallets.map(w => w || '0x0000000000000000000000000000000000000000');
+      bettingService.resolveMatchBetting({
+        matchId: match.id,
+        winnerAgentNames,
+        winnerAgentWallets,
+        isDraw,
+      }).catch(err => console.error('[ShooterMatchManager] resolveMatchBetting failed:', err));
+    }).catch(() => {});
 
     // Open next lobby after results display
     this.resultsTimer = setTimeout(() => {

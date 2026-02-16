@@ -127,6 +127,9 @@ window.connectWallet = async function connectWallet() {
     signer = await provider.getSigner();
     walletAddress = await signer.getAddress();
 
+    // Persist address so other pages (Claw Shooter) can auto-connect
+    try { localStorage.setItem('clawio_wallet_address', walletAddress); } catch (_) {}
+
     // Load contract info from backend
     await loadContractInfo();
 
@@ -207,6 +210,8 @@ window.addEventListener('reown-wallet-connected', async function (e) {
     provider = new ethers.BrowserProvider(reownProvider);
     signer = await provider.getSigner();
     walletAddress = address;
+    // Persist address so other pages (Claw Shooter) can auto-connect
+    try { localStorage.setItem('clawio_wallet_address', walletAddress); } catch (_) {}
     await loadContractInfo();
     updateWalletUI();
     showToast('Wallet connected: ' + shortenAddr(walletAddress), 'success');
@@ -225,6 +230,7 @@ window.addEventListener('reown-wallet-disconnected', function () {
   signer = null;
   provider = null;
   bettingContract = null;
+  try { localStorage.removeItem('clawio_wallet_address'); } catch (_) {}
   const btn = document.getElementById('wallet-connect-btn');
   const homeBtn = document.getElementById('home-wallet-connect-btn');
   if (btn) btn.textContent = 'Connect Wallet';
@@ -243,6 +249,7 @@ if (window.ethereum) {
       walletAddress = null;
       signer = null;
       bettingContract = null;
+      try { localStorage.removeItem('clawio_wallet_address'); } catch (_) {}
       const btn = document.getElementById('wallet-connect-btn');
       const homeBtn = document.getElementById('home-wallet-connect-btn');
       if (btn) btn.textContent = 'Connect Wallet';
@@ -253,6 +260,7 @@ if (window.ethereum) {
       if (connected) connected.classList.add('hidden');
     } else {
       walletAddress = accounts[0];
+      try { localStorage.setItem('clawio_wallet_address', walletAddress); } catch (_) {}
       connectWallet();
     }
   });

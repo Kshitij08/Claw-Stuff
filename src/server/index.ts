@@ -113,8 +113,10 @@ app.use('/api', createNftRoutes());
 app.use('/api/shooter', createShooterRoutes(shooterMatchManager));
 
 // Wire betting service WebSocket emitter so betting events are broadcast to spectators
+// Emit to both root (snake) and /shooter namespace so both frontends receive betting events
 setEmitter((event: string, data: any) => {
   io.emit(event, data);
+  shooterNs.emit(event, data);
 });
 
 // ── Socket.IO memory protection ─────────────────────────────────────
@@ -230,6 +232,32 @@ shooterNs.on('connection', (socket) => {
     socket.emit('shooterState', state);
   }
   socket.emit('shooterStatus', shooterMatchManager.getStatus());
+
+  // Handle human bet notification (same as root namespace handler)
+  socket.on('humanBetPlaced', async (data: {
+    matchId: string;
+    bettorAddress: string;
+    agentName: string;
+    amountWei: string;
+    txHash: string;
+    token?: 'MON' | 'MCLAW';
+  }) => {
+    try {
+      const { placeBet } = await import('./betting/service.js');
+      await placeBet({
+        bettorAddress: data.bettorAddress,
+        bettorType: 'human',
+        bettorName: null,
+        matchId: data.matchId,
+        agentName: data.agentName,
+        amountWei: data.amountWei,
+        token: data.token === 'MCLAW' ? 'MCLAW' : 'MON',
+        txHash: data.txHash,
+      });
+    } catch (err) {
+      console.error('[ws/shooter] humanBetPlaced handler failed:', err);
+    }
+  });
 
   socket.on('disconnect', () => {
     // no-op

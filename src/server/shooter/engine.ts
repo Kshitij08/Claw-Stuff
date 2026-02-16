@@ -895,6 +895,9 @@ export class ShooterEngine {
     if (!stats || stats.isMelee) return;
     if (!canFire(player.weapon, player.ammo, player.lastShotTime, now)) return;
 
+    player.angle = aimAngle;
+    this.moveIntents.set(player.id, { angle: aimAngle });
+
     player.lastShotTime = now;
     player.ammo = consumeAmmo(player.ammo);
 
@@ -1160,12 +1163,16 @@ export class ShooterEngine {
     }
 
     if (closestVictim) {
-      // Raycast to check line of sight (can't knife through walls)
-      const rayY = this.getPlayerRayHeight(player.id);
-      const origin = { x: player.x, y: rayY, z: player.z };
       const dx = closestVictim.x - player.x;
       const dz = closestVictim.z - player.z;
       const dist = Math.sqrt(dx * dx + dz * dz);
+      const angleToVictim = (Math.atan2(dz, dx) * 180) / Math.PI;
+      player.angle = angleToVictim;
+      this.moveIntents.set(player.id, { angle: angleToVictim });
+
+      // Raycast to check line of sight (can't knife through walls)
+      const rayY = this.getPlayerRayHeight(player.id);
+      const origin = { x: player.x, y: rayY, z: player.z };
       const dirNorm = dist > 1e-6 ? dist : 1;
       const direction = { x: dx / dirNorm, y: 0, z: dz / dirNorm };
       const ray = new this.rapier.Ray(origin, direction);

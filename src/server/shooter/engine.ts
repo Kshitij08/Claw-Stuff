@@ -50,7 +50,11 @@ import {
   pickupWeapon,
   dropWeapon,
   pickSpawnPoint,
-  generateSpreadSpawns,
+  pickUnoccupiedSpawnPoint,
+  pickRandomUnoccupiedSpawnPoint,
+  getOccupiedSpawnIndices,
+  randomArenaPoint,
+  randomArenaPointInEmptySpace,
   getTotalSurvivalSeconds,
   resetCharacterIndex,
 } from './player.js';
@@ -181,14 +185,27 @@ export class ShooterEngine {
     if (!this.match) return null;
     if (this.match.players.has(playerId)) return null;
 
+    const spawnPoints = this.mapGeometry.spawnPoints;
     const alivePlayers = [...this.match.players.values()].filter((p) => p.alive);
-    const spawn = pickSpawnPoint(this.mapGeometry.spawnPoints, alivePlayers);
+    const pickups = this.match.pickups.filter((p) => !p.taken).map((p) => ({ x: p.x, y: p.y, z: p.z }));
+    const occupied = getOccupiedSpawnIndices(spawnPoints, alivePlayers, pickups);
+
+    let spawn = pickUnoccupiedSpawnPoint(spawnPoints, occupied) ?? null;
+    if (!spawn && spawnPoints.length > 0) {
+      spawn = pickSpawnPoint(spawnPoints, alivePlayers, occupied);
+    }
+    if (!spawn) {
+      const randomEmpty = randomArenaPointInEmptySpace(
+        (x, y, z, r) => this.isPointInEmptySpace(x, y, z, r),
+        PLAYER_CAPSULE_RADIUS + 0.2,
+      );
+      spawn = randomEmpty ?? randomArenaPoint();
+    }
+
     const player = createPlayer(playerId, name, spawn, strategyTag);
     this.match.players.set(playerId, player);
 
-    // Create Rapier kinematic body for this player
     this.createPlayerBody(player);
-
     return player;
   }
 
@@ -441,6 +458,31 @@ export class ShooterEngine {
     }
 
     return dx !== 0 ? dx : dz;
+  }
+
+  /**
+   * Returns true if a sphere of the given radius at (x, y, z) does not intersect the map (fixed bodies).
+   * Used to spawn only in empty space when no spawn points are free.
+   */
+  isPointInEmptySpace(x: number, y: number, z: number, radius: number): boolean {
+    const shape = new this.rapier.Ball(radius);
+    const shapePos = { x, y, z };
+    const shapeRot = { w: 1, x: 0, y: 0, z: 0 };
+    let hitsMap = false;
+    this.world.intersectionsWithShape(
+      shapePos,
+      shapeRot,
+      shape,
+      (collider: RAPIER.Collider) => {
+        const body = collider.parent();
+        if (body && body.isFixed()) {
+          hitsMap = true;
+          return false;
+        }
+        return true;
+      },
+    );
+    return !hitsMap;
   }
 
   private syncPositions(): void {
@@ -707,10 +749,9 @@ export class ShooterEngine {
   }
 
   private handlePlayerDeath(player: ShooterPlayer): void {
-    // Drop weapon as pickup
     const droppedType = dropWeapon(player);
     if (droppedType) {
-      this.addPickup(droppedType, player.x, player.y, player.z);
+      this.addPickup(droppedType);
     }
 
     // Move Rapier body far away (will be repositioned on respawn)
@@ -731,11 +772,24 @@ export class ShooterEngine {
       if (player.alive || player.eliminated || !player.diedAt) continue;
       if (now - player.diedAt < RESPAWN_DELAY_MS) continue;
 
+      const spawnPoints = this.mapGeometry.spawnPoints;
       const alivePlayers = [...this.match.players.values()].filter((p) => p.alive);
-      const spawn = pickSpawnPoint(this.mapGeometry.spawnPoints, alivePlayers);
+      const pickups = this.match.pickups.filter((p) => !p.taken).map((p) => ({ x: p.x, y: p.y, z: p.z }));
+      const occupied = getOccupiedSpawnIndices(spawnPoints, alivePlayers, pickups);
+
+      let spawn = pickRandomUnoccupiedSpawnPoint(spawnPoints, occupied) ?? null;
+      if (!spawn && spawnPoints.length > 0) {
+        spawn = pickSpawnPoint(spawnPoints, alivePlayers, occupied);
+      }
+      if (!spawn) {
+        const randomEmpty = randomArenaPointInEmptySpace(
+          (x, y, z, r) => this.isPointInEmptySpace(x, y, z, r),
+          PLAYER_CAPSULE_RADIUS + 0.2,
+        );
+        spawn = randomEmpty ?? randomArenaPoint();
+      }
 
       if (respawnPlayer(player, spawn)) {
-        // Reposition Rapier body
         const body = this.playerBodies.get(player.id);
         if (body) {
           body.rigidBody.setNextKinematicTranslation({
@@ -768,38 +822,92 @@ export class ShooterEngine {
   private spawnInitialPickups(): void {
     if (!this.match) return;
 
-    const spawns = this.mapGeometry.spawnPoints.length > 0
-      ? this.mapGeometry.spawnPoints
-      : [{ x: 0, y: 0, z: 0 }];
+    const spawnPoints = this.mapGeometry.spawnPoints;
+    const alivePlayers = [...this.match.players.values()].filter((p) => p.alive);
+    const pickupsSoFar = this.match.pickups.map((p) => ({ x: p.x, y: p.y, z: p.z }));
 
     for (let i = 0; i < INITIAL_WEAPON_PICKUPS; i++) {
-      const spawn = spawns[Math.floor(Math.random() * spawns.length)];
-      // Offset slightly from spawn point
-      const offsetX = (Math.random() - 0.5) * 8;
-      const offsetZ = (Math.random() - 0.5) * 8;
-      const x = Math.max(ARENA_MIN_X, Math.min(ARENA_MAX_X, spawn.x + offsetX));
-      const z = Math.max(ARENA_MIN_Z, Math.min(ARENA_MAX_Z, spawn.z + offsetZ));
+      const occupied = getOccupiedSpawnIndices(spawnPoints, alivePlayers, pickupsSoFar);
+      let x: number; let y: number; let z: number;
 
+      const spawn = pickUnoccupiedSpawnPoint(spawnPoints, occupied);
+      if (spawn) {
+        x = spawn.x;
+        y = spawn.y;
+        z = spawn.z;
+      } else {
+        const randomEmpty = randomArenaPointInEmptySpace(
+          (px, py, pz, r) => this.isPointInEmptySpace(px, py, pz, r),
+          PICKUP_RADIUS,
+        );
+        if (randomEmpty) {
+          x = randomEmpty.x; y = randomEmpty.y; z = randomEmpty.z;
+        } else {
+          const fallback = randomArenaPoint();
+          x = fallback.x; y = fallback.y; z = fallback.z;
+        }
+      }
+
+      pickupsSoFar.push({ x, y, z });
       const weaponType = GUN_TYPES[i % GUN_TYPES.length];
       this.match.pickups.push({
         id: `pickup-${i}-${Date.now()}`,
         type: weaponType,
         x,
-        y: spawn.y,
+        y,
         z,
         taken: false,
       });
     }
   }
 
-  private addPickup(type: WeaponType, x: number, y: number, z: number): void {
+  /**
+   * Add a weapon pickup. If x,y,z are provided (e.g. weapon swap), use that position.
+   * Otherwise (e.g. death drop) place at an unoccupied spawn or random empty space.
+   */
+  private addPickup(type: WeaponType, x?: number, y?: number, z?: number): void {
     if (!this.match) return;
+
+    if (x !== undefined && y !== undefined && z !== undefined) {
+      this.match.pickups.push({
+        id: `drop-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        type,
+        x,
+        y,
+        z,
+        taken: false,
+      });
+      return;
+    }
+
+    const spawnPoints = this.mapGeometry.spawnPoints;
+    const alivePlayers = [...this.match.players.values()].filter((p) => p.alive);
+    const pickups = this.match.pickups.filter((p) => !p.taken).map((p) => ({ x: p.x, y: p.y, z: p.z }));
+    const occupied = getOccupiedSpawnIndices(spawnPoints, alivePlayers, pickups);
+
+    let px: number; let py: number; let pz: number;
+    const spawn = pickUnoccupiedSpawnPoint(spawnPoints, occupied);
+    if (spawn) {
+      px = spawn.x; py = spawn.y; pz = spawn.z;
+    } else {
+      const randomEmpty = randomArenaPointInEmptySpace(
+        (ax, ay, az, r) => this.isPointInEmptySpace(ax, ay, az, r),
+        PICKUP_RADIUS,
+      );
+      if (randomEmpty) {
+        px = randomEmpty.x; py = randomEmpty.y; pz = randomEmpty.z;
+      } else {
+        const fallback = randomArenaPoint();
+        px = fallback.x; py = fallback.y; pz = fallback.z;
+      }
+    }
+
     this.match.pickups.push({
       id: `drop-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       type,
-      x,
-      y,
-      z,
+      x: px,
+      y: py,
+      z: pz,
       taken: false,
     });
   }

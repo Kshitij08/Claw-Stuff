@@ -140,27 +140,99 @@ export function getTotalSurvivalSeconds(player: ShooterPlayer): number {
 
 // ── Spawn helpers ──────────────────────────────────────────────────
 
+/** Distance within which an entity (player or pickup) is considered to occupy a spawn point. */
+const SPAWN_OCCUPANCY_RADIUS = 2.5;
+
+/**
+ * Get the set of spawn point indices that are occupied by any alive player or untaken pickup.
+ * Used so we never spawn two players or two weapons at the same spawn.
+ */
+export function getOccupiedSpawnIndices(
+  spawnPoints: SpawnPoint[],
+  players: ShooterPlayer[],
+  pickups: { x: number; y: number; z: number }[],
+): Set<number> {
+  const occupied = new Set<number>();
+  const r2 = SPAWN_OCCUPANCY_RADIUS * SPAWN_OCCUPANCY_RADIUS;
+
+  for (let i = 0; i < spawnPoints.length; i++) {
+    const sp = spawnPoints[i];
+    for (const p of players) {
+      if (!p.alive) continue;
+      const dx = sp.x - p.x, dz = sp.z - p.z;
+      if (dx * dx + dz * dz <= r2) {
+        occupied.add(i);
+        break;
+      }
+    }
+    if (occupied.has(i)) continue;
+    for (const pk of pickups) {
+      const dx = sp.x - pk.x, dz = sp.z - pk.z;
+      if (dx * dx + dz * dz <= r2) {
+        occupied.add(i);
+        break;
+      }
+    }
+  }
+  return occupied;
+}
+
+/**
+ * Pick an unoccupied spawn point (players prioritized: call this for players first, then weapons).
+ * Returns null if all spawns are occupied.
+ */
+export function pickUnoccupiedSpawnPoint(
+  spawnPoints: SpawnPoint[],
+  occupiedIndices: Set<number>,
+): SpawnPoint | null {
+  if (spawnPoints.length === 0) return null;
+  for (let i = 0; i < spawnPoints.length; i++) {
+    if (!occupiedIndices.has(i)) return spawnPoints[i];
+  }
+  return null;
+}
+
+/**
+ * Pick a random unoccupied spawn point. Used for respawns so players don't always get the same spawn.
+ * Returns null if all spawns are occupied.
+ */
+export function pickRandomUnoccupiedSpawnPoint(
+  spawnPoints: SpawnPoint[],
+  occupiedIndices: Set<number>,
+): SpawnPoint | null {
+  if (spawnPoints.length === 0) return null;
+  const available: SpawnPoint[] = [];
+  for (let i = 0; i < spawnPoints.length; i++) {
+    if (!occupiedIndices.has(i)) available.push(spawnPoints[i]);
+  }
+  if (available.length === 0) return null;
+  return available[Math.floor(Math.random() * available.length)];
+}
+
 /**
  * Pick the best spawn point that is far from all alive players.
- * Falls back to random if no spawn points available.
+ * Prefers unoccupied spawn points; falls back to random if none or all occupied.
  */
 export function pickSpawnPoint(
   spawnPoints: SpawnPoint[],
   alivePlayers: ShooterPlayer[],
+  occupiedIndices?: Set<number>,
 ): SpawnPoint {
   if (spawnPoints.length === 0) {
     return randomArenaPoint();
   }
+  if (occupiedIndices !== undefined) {
+    const sp = pickUnoccupiedSpawnPoint(spawnPoints, occupiedIndices);
+    if (sp) return sp;
+  }
 
-  // Score each spawn by minimum distance to any alive player (higher = better)
+  // Fallback: score by distance to alive players (higher = better)
   let bestSpawn = spawnPoints[0];
   let bestMinDist = -1;
-
   for (const sp of spawnPoints) {
     let minDist = Infinity;
     for (const p of alivePlayers) {
-      const dx = sp.x - p.x;
-      const dz = sp.z - p.z;
+      const dx = sp.x - p.x, dz = sp.z - p.z;
       const dist = Math.sqrt(dx * dx + dz * dz);
       if (dist < minDist) minDist = dist;
     }
@@ -169,17 +241,36 @@ export function pickSpawnPoint(
       bestSpawn = sp;
     }
   }
-
   return bestSpawn;
 }
 
-function randomArenaPoint(): SpawnPoint {
+export function randomArenaPoint(): SpawnPoint {
   const margin = 5;
   return {
     x: ARENA_MIN_X + margin + Math.random() * (ARENA_MAX_X - ARENA_MIN_X - 2 * margin),
     y: 0,
     z: ARENA_MIN_Z + margin + Math.random() * (ARENA_MAX_Z - ARENA_MIN_Z - 2 * margin),
   };
+}
+
+/**
+ * Try to find a random point in the arena that is in empty space (not inside/on map mesh).
+ * checkEmpty(x, y, z) should return true if a sphere at that point does not intersect the map.
+ * Returns a point or null after maxAttempts.
+ */
+export function randomArenaPointInEmptySpace(
+  checkEmpty: (x: number, y: number, z: number, radius: number) => boolean,
+  radius: number,
+  maxAttempts = 50,
+): SpawnPoint | null {
+  const margin = 5;
+  for (let i = 0; i < maxAttempts; i++) {
+    const x = ARENA_MIN_X + margin + Math.random() * (ARENA_MAX_X - ARENA_MIN_X - 2 * margin);
+    const z = ARENA_MIN_Z + margin + Math.random() * (ARENA_MAX_Z - ARENA_MIN_Z - 2 * margin);
+    const y = 0;
+    if (checkEmpty(x, y, z, radius)) return { x, y, z };
+  }
+  return null;
 }
 
 /** Generate spread spawn positions (min separation) for initial placement. */

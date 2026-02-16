@@ -64,10 +64,16 @@ function findAction(actions, name) {
   return null;
 }
 
+/** No longer applying bloom/emissive to character body (bloom removed from characters). */
+function applyBloomEmissive(_root) {
+  /* intentionally no-op */
+}
+
 export function CharacterPlayer({
   character,
   animation = "Idle",
   weapon = "knife",
+  bloom = true,
   ...props
 }) {
   const group = useRef();
@@ -76,6 +82,11 @@ export function CharacterPlayer({
 
   const clone = useMemo(() => SkeletonUtils.clone(scene), [scene]);
   const { actions } = useAnimations(animations, group);
+
+  /* Add emissive so bloom post-processing glows all G_*.glb characters */
+  useEffect(() => {
+    applyBloomEmissive(clone);
+  }, [clone]);
 
   /* Show only the gun child that matches current weapon; hide the rest */
   useEffect(() => {

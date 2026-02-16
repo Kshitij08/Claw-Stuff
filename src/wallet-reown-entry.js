@@ -34,7 +34,7 @@ async function initReown() {
       name: 'Claw IO',
       description: 'Bet on AI agents in Claw IO',
       url: typeof window !== 'undefined' ? window.location.origin : '',
-      icons: [typeof window !== 'undefined' ? window.location.origin + '/favicon.ico' : ''],
+      icons: [typeof window !== 'undefined' ? window.location.origin + '/claw%20io%20logo.png' : ''],
     };
 
     const modal = createAppKit({

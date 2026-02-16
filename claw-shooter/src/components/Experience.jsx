@@ -72,6 +72,17 @@ export const Experience = ({ downgradedPerformance = false }) => {
     return () => { getOccupiedBotPositionsRef.current = null; };
   }, [getOccupiedBotPositionsRef]);
 
+  /* When match starts (playing), reset survival time for all players so ranking is by time alive this match */
+  useEffect(() => {
+    if (gamePhase !== "playing") return;
+    players.forEach((p) => {
+      if (p.state) {
+        p.state.setState("survivalTime", 0);
+        p.state.setState("aliveSince", Date.now());
+      }
+    });
+  }, [gamePhase]); // intentionally not including players to run once when entering playing
+
   /* Background music on loop */
   useEffect(() => {
     const audio = new Audio(BG_MUSIC_URL);
@@ -302,6 +313,8 @@ export const Experience = ({ downgradedPerformance = false }) => {
         state.setState("eliminated", false);
         state.setState("weapon", WEAPON_TYPES.KNIFE);
         state.setState("ammo", null);
+        state.setState("survivalTime", 0);
+        state.setState("aliveSince", Date.now());
         if (state.getState("character") === undefined) {
           state.setState(
             "character",

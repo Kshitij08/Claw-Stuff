@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect } from "react";
 import { Vector3 } from "three";
-import { GUN_TYPES, PLAYER_COUNT, MAP_BOUNDS, MIN_DISTANCE_GUN_FROM_PLAYER_SPAWN, MIN_DISTANCE_GUN_FROM_GUN } from "../constants/weapons";
+import { GUN_TYPES, INITIAL_WEAPON_PICKUPS, MAP_BOUNDS, MIN_DISTANCE_GUN_FROM_PLAYER_SPAWN, MIN_DISTANCE_GUN_FROM_GUN } from "../constants/weapons";
 
 const GameManagerContext = createContext(null);
 
@@ -11,6 +11,7 @@ export function GameManagerProvider({ children }) {
   const [finalRanking, setFinalRanking] = useState([]);
   const [selectedBotId, setSelectedBotId] = useState(null); // null = free cam, string = third-person follow that bot
   const countdownRef = useRef(null);
+  const matchStartTimeRef = useRef(null); // set when phase transitions to "playing"
   const spawnPositionsRef = useRef([]);
   /** Set by Experience: () => array of {x,y,z} currently occupied by bots (alive, not dead) */
   const getOccupiedBotPositionsRef = useRef(null);
@@ -31,6 +32,7 @@ export function GameManagerProvider({ children }) {
         clearInterval(countdownRef.current);
         countdownRef.current = null;
         setCountdown(0);
+        matchStartTimeRef.current = Date.now();
         setGamePhase("playing");
       } else {
         setCountdown(remaining);
@@ -100,7 +102,7 @@ export function GameManagerProvider({ children }) {
     if (positions.length === 0) return;
     shuffle(positions);
     const pickups = [];
-    const count = Math.min(PLAYER_COUNT, positions.length);
+    const count = Math.min(INITIAL_WEAPON_PICKUPS, positions.length);
     const chosen = [];
     for (let i = 0; i < count; i++) {
       const cx = (x) => x?.x ?? 0;
@@ -131,13 +133,22 @@ export function GameManagerProvider({ children }) {
       return lives > 0;
     });
     if (withLivesLeft.length <= 1) {
+      const now = Date.now();
+      const getSurvivalSeconds = (p) => {
+        const state = p.state;
+        const accumulated = state.getState?.("survivalTime") ?? state.survivalTime ?? 0;
+        const aliveSince = state.getState?.("aliveSince") ?? state.aliveSince ?? now;
+        const lives = state.getState?.("lives") ?? state.lives ?? 0;
+        const eliminated = state.getState?.("eliminated") ?? state.eliminated;
+        const dead = state.getState?.("dead") ?? state.dead;
+        if (lives > 0 && !eliminated && !dead) {
+          return accumulated + (now - aliveSince) / 1000;
+        }
+        return accumulated;
+      };
       const ranking = [...players]
         .filter((p) => p.state)
-        .sort((a, b) => {
-          const ak = a.state.getState?.("kills") ?? a.state.kills ?? 0;
-          const bk = b.state.getState?.("kills") ?? b.state.kills ?? 0;
-          return bk - ak;
-        })
+        .sort((a, b) => getSurvivalSeconds(b) - getSurvivalSeconds(a))
         .map((p, i) => ({
           rank: i + 1,
           id: p.state?.id ?? p.id,
@@ -145,6 +156,7 @@ export function GameManagerProvider({ children }) {
           kills: p.state?.getState?.("kills") ?? p.state?.kills ?? 0,
           deaths: p.state?.getState?.("deaths") ?? p.state?.deaths ?? 0,
           personality: p.state?.getState?.("personality") ?? p.state?.personality ?? "?",
+          survivalTimeSeconds: getSurvivalSeconds(p),
         }));
       setFinalRanking(ranking);
       setGamePhase("ended");
@@ -156,6 +168,10 @@ export function GameManagerProvider({ children }) {
     setFinalRanking([]);
     spawnWeaponPickups(spawnPositions);
   }, [spawnWeaponPickups]);
+
+  useEffect(() => {
+    if (gamePhase !== "playing") matchStartTimeRef.current = null;
+  }, [gamePhase]);
 
   const value = {
     gamePhase,
@@ -173,6 +189,7 @@ export function GameManagerProvider({ children }) {
     getOccupiedBotPositionsRef,
     selectedBotId,
     setSelectedBotId,
+    matchStartTimeRef,
   };
 
   return (

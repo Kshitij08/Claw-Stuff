@@ -96,7 +96,9 @@ export const PERSONALITIES = [
 
 export const LIVES_PER_BOT = 3;
 export const HEALTH_PER_LIFE = 100;
-export const PLAYER_COUNT = 4;
+export const PLAYER_COUNT = 5;
+/** Number of weapon pickups spawned at match start (one per bot). */
+export const INITIAL_WEAPON_PICKUPS = 5;
 
 /** Play area bounds so bots don't wander off the map (x and z; y is unchanged) */
 export const MAP_BOUNDS = {

@@ -422,6 +422,7 @@ export const BotController = ({
       state.setState("health", HEALTH_PER_LIFE);
       state.setState("weapon", WEAPON_TYPES.KNIFE);
       state.setState("ammo", null);
+      state.setState("aliveSince", Date.now());
 
       /* Reset stuck detection on respawn */
       stuckAccumRef.current = 0;
@@ -784,6 +785,11 @@ export const BotController = ({
             state.setState("lastDamageTime", Date.now());
             const newHealth = state.state.health - damage;
             if (newHealth <= 0) {
+              const aliveSince = state.getState("aliveSince") ?? Date.now();
+              state.setState(
+                "survivalTime",
+                (state.getState("survivalTime") ?? 0) + (Date.now() - aliveSince) / 1000
+              );
               state.setState("dead", true);
               state.setState("deaths", (state.state.deaths || 0) + 1);
               state.setState("health", 0);
@@ -804,6 +810,7 @@ export const BotController = ({
             animation={animation}
             character={state.getState("character")}
             weapon={state.getState("weapon") ?? "knife"}
+            bloom
           />
         </group>
         <CapsuleCollider args={[0.7, 0.66]} position={[0, 1.28, 0]} />

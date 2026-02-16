@@ -1,27 +1,102 @@
-import { usePlayersList } from "playroomkit";
+import { createPortal } from "react-dom";
 import { useGameManager } from "./GameManager";
-import { WEAPON_LABELS } from "../constants/weapons";
+
+function formatSurvival(seconds) {
+  const sec = seconds ?? 0;
+  return `${Math.floor(sec / 60)}:${Math.floor(sec % 60).toString().padStart(2, "0")}`;
+}
 
 export const Leaderboard = () => {
-  const allPlayers = usePlayersList(true);
-  const { gamePhase, finalRanking, countdown, startMatch, selectedBotId, setSelectedBotId } = useGameManager();
+  const { gamePhase, finalRanking, countdown, startMatch } = useGameManager();
 
-  /* Only show bots in the leaderboard – the local spectator/host is not a participant */
-  const players = allPlayers.filter(
-    (p) => p.state?.isBot?.() ?? p.isBot?.() ?? false
+  const gameContainer = typeof document !== "undefined" ? document.getElementById("game-view-center") : null;
+
+  const fullscreenButton = (
+    <button
+      className="absolute top-4 right-4 z-20 text-white p-2 rounded bg-black/40 hover:bg-black/60 border-2 border-white/50"
+      onClick={(e) => {
+        if (document.fullscreenElement) document.exitFullscreen();
+        else document.documentElement.requestFullscreen();
+        e.currentTarget.blur();
+      }}
+      title="Toggle fullscreen"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+      </svg>
+    </button>
   );
 
-  const aliveCount = players.filter((p) => {
-    const state = p.state;
-    const eliminated = state?.getState?.("eliminated") ?? state?.eliminated;
-    const lives = state?.getState?.("lives") ?? state?.lives ?? 3;
-    const dead = state?.getState?.("dead") ?? state?.dead;
-    return !eliminated && lives > 0 && !dead;
-  }).length;
+  const gameAreaOverlay =
+    gameContainer &&
+    createPortal(
+      <>
+        {/* Playing: camera hint only — one line, top center */}
+        {gamePhase === "playing" && (
+          <div className="absolute top-0 left-0 right-0 z-10 pointer-events-none flex justify-center pt-4">
+            <div className="bg-slate-800/95 text-white text-sm md:text-base font-bold rounded-lg px-4 py-2 border-2 border-white shadow-[4px_4px_0_black] text-center whitespace-nowrap">
+              Click bot or their name in leaderboard to follow • Left drag to orbit • Esc = free cam
+            </div>
+          </div>
+        )}
+
+        {/* End screen — claw-snake theme: winner card + full table */}
+        {gamePhase === "ended" && finalRanking.length > 0 && (
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/80 p-4 overflow-y-auto">
+            <div className="bg-slate-800 p-2 border-4 border-white shadow-[10px_10px_0_#facc15] max-w-sm w-full animate-float my-auto max-h-[90%] overflow-y-auto">
+              <div className="bg-[#22d3ee] p-4 md:p-6 text-center border-2 border-white">
+                <div className="w-16 h-16 mx-auto mb-3 bg-white rounded-full flex items-center justify-center border-4 border-black animate-bounce">
+                  <svg className="w-8 h-8 text-[#facc15]" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l2.4 7.4h7.6l-6 4.6 2.3 7-6.3-4.6L5.7 21l2.3-7-6-4.6h7.6L12 2z" /></svg>
+                </div>
+                <h2 className="text-3xl md:text-4xl neo-font text-white mb-1" style={{ WebkitTextStroke: "2px black", textShadow: "3px 3px 0 black" }}>WINNER!</h2>
+                <p className="text-[10px] font-black uppercase text-black/80 mb-3">Battle Royale — ranked by survival</p>
+                <div className="text-lg font-black text-black bg-white inline-block px-4 py-2 border-2 border-black shadow-[4px_4px_0_black] mb-3">
+                  {finalRanking[0]?.name ?? "—"}
+                </div>
+                <div className="mb-4">
+                  <div className="bg-white p-2 border-2 border-black inline-block">
+                    <div className="text-[10px] font-black uppercase text-black">Survival</div>
+                    <div className="text-xl neo-font text-[#d946ef]">{formatSurvival(finalRanking[0]?.survivalTimeSeconds)}</div>
+                  </div>
+                </div>
+                <table className="winner-table">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Agent</th>
+                      <th>Survival</th>
+                      <th>K/D</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {finalRanking.map((entry) => (
+                      <tr key={entry.id} className={entry.rank === 1 ? "highlight" : ""}>
+                        <td>{entry.rank}</td>
+                        <td>{entry.name}</td>
+                        <td>{formatSurvival(entry.survivalTimeSeconds)}</td>
+                        <td>{entry.kills}/{entry.deaths}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <button
+                  className="mt-4 w-full btn-neo btn-cyan"
+                  onClick={() => window.location.reload()}
+                >
+                  Watch Again
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {(gamePhase === "playing" || (gamePhase === "ended" && finalRanking.length > 0)) && fullscreenButton}
+      </>,
+      gameContainer
+    );
 
   return (
     <>
-      {/* Lobby: Start Match button */}
       {gamePhase === "lobby" && (
         <div className="fixed inset-0 z-20 flex flex-col items-center justify-center bg-black/70 backdrop-blur-sm">
           <h1 className="text-3xl font-bold text-white mb-8">Claw Shooter</h1>
@@ -34,139 +109,13 @@ export const Leaderboard = () => {
         </div>
       )}
 
-      {/* Countdown overlay */}
       {gamePhase === "countdown" && countdown > 0 && (
         <div className="fixed inset-0 z-30 flex items-center justify-center pointer-events-none">
-          <span className="text-white text-8xl font-black drop-shadow-lg animate-pulse">
-            {countdown}
-          </span>
+          <span className="text-white text-8xl font-black drop-shadow-lg animate-pulse">{countdown}</span>
         </div>
       )}
 
-      {/* Playing: top bar with player stats — click a bot to follow in third-person; Escape to free cam */}
-      {gamePhase === "playing" && (
-        <div className="fixed top-0 left-0 right-0 p-4 flex z-10 gap-4 flex-wrap items-start">
-          <div className="bg-white/70 backdrop-blur-sm rounded-lg px-3 py-2 font-bold text-sm">
-            Alive: {aliveCount} / {players.length}
-          </div>
-          <div className="bg-black/40 text-white/90 text-xs rounded-lg px-2 py-1.5">
-            Click bot or card to follow • Left-drag to orbit • Click again or Esc = free cam
-          </div>
-          {players.map((player) => {
-            const state = player.state;
-            const name =
-              state?.getProfile?.()?.name ??
-              state?.profile?.name ??
-              state?.getState?.("profile")?.name ??
-              player.id;
-            const kills = state?.getState?.("kills") ?? state?.kills ?? 0;
-            const deaths = state?.getState?.("deaths") ?? state?.deaths ?? 0;
-            const lives = state?.getState?.("lives") ?? state?.lives ?? 3;
-            const eliminated =
-              state?.getState?.("eliminated") ?? state?.eliminated;
-            const weapon =
-              state?.getState?.("weapon") ?? state?.weapon ?? "knife";
-            const ammo =
-              state?.getState?.("ammo") ?? state?.ammo ?? null;
-            const color =
-              state?.getProfile?.()?.color?.hexString ??
-              state?.profile?.color ??
-              "#888";
-            const weaponLabel = WEAPON_LABELS[weapon] || weapon;
-            const isSelected = selectedBotId === player.id;
-            return (
-              <div
-                key={player.id}
-                role="button"
-                tabIndex={0}
-                onClick={() => setSelectedBotId(isSelected ? null : player.id)}
-                onKeyDown={(e) => e.key === "Enter" && setSelectedBotId(isSelected ? null : player.id)}
-                className={`bg-white/60 backdrop-blur-sm flex items-center rounded-lg gap-2 p-2 min-w-[180px] cursor-pointer select-none transition ring-2 ${eliminated ? "opacity-50" : ""} ${isSelected ? "ring-blue-500 ring-offset-2" : "ring-transparent"}`}
-              >
-                <div
-                  className="w-8 h-8 rounded-full border-2 flex-shrink-0"
-                  style={{ borderColor: color, backgroundColor: color }}
-                />
-                <div className="flex-grow min-w-0">
-                  <h2 className="font-bold text-xs truncate">{name}</h2>
-                  <div className="flex text-xs gap-2 flex-wrap">
-                    <span>Kills: {kills}</span>
-                    <span>Deaths: {deaths}</span>
-                    <span>Lives: {lives}</span>
-                  </div>
-                  <div className="text-[10px] text-gray-600 truncate">
-                    {weaponLabel}
-                    {weapon !== "knife" && ammo != null ? ` (${ammo})` : ""}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* End screen */}
-      {gamePhase === "ended" && finalRanking.length > 0 && (
-        <div className="fixed inset-0 z-20 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm p-6">
-          <h1 className="text-2xl font-bold text-white mb-6">
-            Battle Royale Results
-          </h1>
-          <div className="bg-white/10 rounded-xl p-6 max-w-md w-full space-y-2 max-h-[70vh] overflow-y-auto">
-            {finalRanking.map((entry) => (
-              <div
-                key={entry.id}
-                className="flex items-center justify-between gap-4 py-2 border-b border-white/20"
-              >
-                <span className="text-white font-mono w-8">
-                  #{entry.rank}
-                </span>
-                <span className="text-white font-semibold flex-1 truncate">
-                  {entry.name}
-                </span>
-                <span className="text-yellow-400">Kills: {entry.kills}</span>
-                <span className="text-gray-400">Deaths: {entry.deaths}</span>
-                <span className="text-sm text-gray-500">
-                  {entry.personality}
-                </span>
-              </div>
-            ))}
-          </div>
-          <button
-            className="mt-8 px-8 py-3 bg-white text-black font-bold rounded-lg hover:bg-gray-200 transition"
-            onClick={() => window.location.reload()}
-          >
-            Watch Again
-          </button>
-        </div>
-      )}
-
-      <button
-        className="fixed top-4 right-4 z-10 text-white p-2 rounded bg-black/40 hover:bg-black/60"
-        onClick={(e) => {
-          if (document.fullscreenElement) {
-            document.exitFullscreen();
-          } else {
-            document.documentElement.requestFullscreen();
-          }
-          e.currentTarget.blur();
-        }}
-        title="Toggle fullscreen"
-      >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          fill="none"
-          viewBox="0 0 24 24"
-          strokeWidth={1.5}
-          stroke="currentColor"
-          className="w-6 h-6"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15"
-          />
-        </svg>
-      </button>
+      {gameAreaOverlay}
     </>
   );
 };

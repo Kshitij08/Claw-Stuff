@@ -18,8 +18,9 @@ const FOLLOW_SMOOTH = 12;
 export function SpectatorCamera() {
   const controlsRef = useRef();
   const { camera } = useThree();
-  const { selectedBotId, setSelectedBotId } = useGameManager();
+  const { selectedBotId, setSelectedBotId, spectatorMatchState } = useGameManager();
   const players = usePlayersList(true);
+  const spectatorPlayers = spectatorMatchState?.phase === "active" ? spectatorMatchState.players : [];
   const followPosRef = useRef(new Vector3());
   const followTargetRef = useRef(new Vector3());
   const followInitializedRef = useRef(false);
@@ -102,12 +103,25 @@ export function SpectatorCamera() {
         userHasRotatedRef.current = false;
         prevSelectedBotIdRef.current = selectedBotId;
       }
-      const bot = players.find((p) => p.id === selectedBotId);
-      const pos = bot?.state?.pos ?? bot?.state?.getState?.("pos");
-      if (pos) {
-        const bx = pos.x ?? 0;
-        const by = pos.y ?? 0;
-        const bz = pos.z ?? 0;
+      let bx, by, bz;
+      const spectatorBot = spectatorPlayers.find((p) => p.id === selectedBotId);
+      if (spectatorBot) {
+        bx = spectatorBot.x ?? 0;
+        by = 0;
+        bz = spectatorBot.z ?? 0;
+      } else {
+        const bot = players.find((p) => p.id === selectedBotId);
+        const pos = bot?.state?.pos ?? bot?.state?.getState?.("pos");
+        if (!pos) {
+          followInitializedRef.current = false;
+          prevSelectedBotIdRef.current = null;
+          return;
+        }
+        bx = pos.x ?? 0;
+        by = pos.y ?? 0;
+        bz = pos.z ?? 0;
+      }
+      {
         const wantCam = new Vector3(bx + THIRD_PERSON_OFFSET.x, by + THIRD_PERSON_OFFSET.y, bz + THIRD_PERSON_OFFSET.z);
         const wantTgt = new Vector3(bx, by + THIRD_PERSON_LOOK_AT_Y, bz);
         if (!followInitializedRef.current) {

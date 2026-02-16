@@ -10,6 +10,8 @@ export function GameManagerProvider({ children }) {
   const [weaponPickups, setWeaponPickups] = useState([]);
   const [finalRanking, setFinalRanking] = useState([]);
   const [selectedBotId, setSelectedBotId] = useState(null); // null = free cam, string = third-person follow that bot
+  /** Server-driven spectator state (when phase === 'active'): { players, pickups, leaderboard, timeRemaining, phase } */
+  const [spectatorMatchState, setSpectatorMatchState] = useState(null);
   const countdownRef = useRef(null);
   const matchStartTimeRef = useRef(null); // set when phase transitions to "playing"
   const spawnPositionsRef = useRef([]);
@@ -190,6 +192,8 @@ export function GameManagerProvider({ children }) {
     selectedBotId,
     setSelectedBotId,
     matchStartTimeRef,
+    spectatorMatchState,
+    setSpectatorMatchState,
   };
 
   return (

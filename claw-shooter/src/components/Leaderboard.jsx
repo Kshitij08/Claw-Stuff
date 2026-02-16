@@ -3,7 +3,17 @@ import { useState, useEffect } from "react";
 import { useGameManager } from "./GameManager";
 
 const SHOOTER_STATUS_URL = "/api/shooter/status";
+const SHOOTER_SPECTATOR_URL = "/api/shooter/match/spectator";
 const POLL_INTERVAL_MS = 1500;
+const SPECTATOR_POLL_MS = 150;
+
+/** API base: use VITE_API_URL in dev (e.g. http://localhost:3000) so countdown/spectator work when app runs on another port */
+function getApiBase() {
+  if (typeof window === "undefined") return "";
+  const env = import.meta.env?.VITE_API_URL;
+  if (env && typeof env === "string" && env.trim()) return env.trim().replace(/\/$/, "");
+  return window.location.origin;
+}
 
 function formatSurvival(seconds) {
   const sec = seconds ?? 0;
@@ -11,7 +21,7 @@ function formatSurvival(seconds) {
 }
 
 export const Leaderboard = () => {
-  const { gamePhase, finalRanking, countdown } = useGameManager();
+  const { gamePhase, finalRanking, countdown, setSpectatorMatchState } = useGameManager();
 
   // Server-driven shooter status (spectator view)
   const [serverStatus, setServerStatus] = useState(null);
@@ -19,9 +29,9 @@ export const Leaderboard = () => {
 
   useEffect(() => {
     let cancelled = false;
+    const base = getApiBase();
     const fetchStatus = async () => {
       try {
-        const base = typeof window !== "undefined" ? window.location.origin : "";
         const res = await fetch(`${base}${SHOOTER_STATUS_URL}`);
         if (!res.ok || cancelled) return;
         const data = await res.json();
@@ -37,6 +47,34 @@ export const Leaderboard = () => {
       clearInterval(interval);
     };
   }, []);
+
+  // When match is active, poll spectator endpoint and drive 3D view
+  useEffect(() => {
+    if (serverStatus?.currentMatch?.phase !== "active") {
+      setSpectatorMatchState(null);
+      return;
+    }
+    let cancelled = false;
+    const base = getApiBase();
+    const fetchSpectator = async () => {
+      try {
+        const res = await fetch(`${base}${SHOOTER_SPECTATOR_URL}`);
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (!cancelled && data.phase === "active") setSpectatorMatchState(data);
+        else if (!cancelled) setSpectatorMatchState(null);
+      } catch {
+        if (!cancelled) setSpectatorMatchState(null);
+      }
+    };
+    fetchSpectator();
+    const interval = setInterval(fetchSpectator, SPECTATOR_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      setSpectatorMatchState(null);
+    };
+  }, [serverStatus?.currentMatch?.phase, setSpectatorMatchState]);
 
   // Tick countdown every second when server says countdown and we have startsAt
   useEffect(() => {
@@ -176,11 +214,10 @@ export const Leaderboard = () => {
         </div>
       )}
 
-      {/* Server-driven: match in progress */}
+      {/* Server-driven: match in progress – no overlay; 3D spectator view is visible (driven by spectator API) */}
       {showServerActive && (
-        <div className="fixed inset-0 z-20 flex flex-col items-center justify-center bg-black/60 pointer-events-none">
-          <p className="text-white text-2xl font-bold">Match in progress</p>
-          <p className="text-white/80 text-sm mt-2">Agents are playing. Full spectator view coming later.</p>
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
+          <span className="bg-black/50 text-white/90 text-sm font-bold px-3 py-1 rounded">Spectator · Match in progress</span>
         </div>
       )}
 

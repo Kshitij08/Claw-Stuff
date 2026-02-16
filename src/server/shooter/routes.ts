@@ -21,6 +21,60 @@ export function createShooterRoutes(shooterMatchManager: ShooterMatchManager): R
     res.json(shooterMatchManager.getStatus());
   });
 
+  // GET /api/shooter/match/spectator - No auth; read-only state for spectator UI (players, pickups, leaderboard)
+  router.get('/match/spectator', (_req: Request, res: Response) => {
+    const match = shooterMatchManager.getMatchState();
+    if (!match) {
+      res.status(404).json({
+        success: false,
+        error: 'NO_MATCH',
+        message: 'No active shooter match',
+      });
+      return;
+    }
+    const timeRemaining =
+      match.phase === 'active' ? Math.max(0, (match.endTime - Date.now()) / 1000) : 0;
+    const playersList = Array.from(match.players.values()).map((p) => ({
+      id: p.id,
+      name: p.name,
+      alive: p.alive,
+      x: p.x,
+      z: p.z,
+      angle: p.angle,
+      health: p.health,
+      lives: p.lives,
+      weapon: p.weapon,
+      ammo: p.ammo,
+      kills: p.kills,
+      score: p.score,
+      characterId: p.characterId,
+    }));
+    const leaderboard = Array.from(match.players.values())
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+        score: p.score,
+        kills: p.kills,
+        lives: p.lives,
+        alive: p.alive,
+      }))
+      .sort((a, b) => {
+        if (a.alive !== b.alive) return a.alive ? -1 : 1;
+        if (b.score !== a.score) return b.score - a.score;
+        return b.kills - a.kills;
+      });
+    res.json({
+      matchId: match.id,
+      phase: match.phase,
+      tick: match.tick,
+      timeRemaining,
+      arena: { width: 90, height: 90 },
+      players: playersList,
+      pickups: match.pickups.filter((p) => !p.taken).map((p) => ({ id: p.id, x: p.x, z: p.z, weaponType: p.weaponType })),
+      leaderboard,
+    });
+  });
+
   // POST /api/shooter/match/join - Auth required
   router.post('/match/join', async (req: Request, res: Response) => {
     const apiKey = extractApiKey(req);

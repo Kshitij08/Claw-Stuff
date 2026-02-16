@@ -14,6 +14,7 @@ import { BotController, PlayerBot } from "./BotController";
 import { WeaponPickup } from "./WeaponPickup";
 import { BotClickCapture } from "./BotClickCapture";
 import { useGameManager } from "./GameManager";
+import { CharacterPlayer } from "./CharacterPlayer";
 import { useFrame, useThree } from "@react-three/fiber";
 import { Vector3 } from "three";
 import {
@@ -54,7 +55,7 @@ export const Experience = ({ downgradedPerformance = false }) => {
   const pickupsSpawnedRef = useRef(false);
   const bgMusicRef = useRef(null);
   const knifeStabRef = useRef(null);
-  const { weaponPickups, takePickup, addWeaponPickup, spawnWeaponPickups, checkWinCondition, gamePhase, getOccupiedBotPositionsRef } =
+  const { weaponPickups, takePickup, addWeaponPickup, spawnWeaponPickups, checkWinCondition, gamePhase, getOccupiedBotPositionsRef, spectatorMatchState } =
     useGameManager();
   const scene = useThree((s) => s.scene);
   const botPositionsRef = useRef([]);
@@ -409,11 +410,34 @@ export const Experience = ({ downgradedPerformance = false }) => {
     );
   };
 
+  const isSpectatorMode = spectatorMatchState?.phase === "active" && Array.isArray(spectatorMatchState?.players);
+
   return (
     <>
       <BotClickCapture />
       <MapWithFallback />
-      {weaponPickups.map((p) => (
+      {/* Server-driven spectator: players and pickups from API */}
+      {isSpectatorMode && spectatorMatchState.players.map((p) => (
+        <CharacterPlayer
+          key={p.id}
+          character={p.characterId && /^G_\d+$/.test(p.characterId) ? p.characterId : "G_1"}
+          weapon={p.weapon || "knife"}
+          animation={p.alive ? "Idle" : "Death"}
+          position={[p.x, 0, p.z]}
+          rotation={[0, p.angle ?? 0, 0]}
+        />
+      ))}
+      {isSpectatorMode && spectatorMatchState.pickups?.map((p) => (
+        <WeaponPickup
+          key={p.id}
+          id={p.id}
+          weaponType={p.weaponType}
+          position={{ x: p.x, y: 0, z: p.z }}
+          taken={false}
+        />
+      ))}
+      {/* Local Playroom pickups (when not in spectator mode) */}
+      {!isSpectatorMode && weaponPickups.map((p) => (
         <WeaponPickup
           key={p.id}
           id={p.id}
@@ -422,7 +446,7 @@ export const Experience = ({ downgradedPerformance = false }) => {
           taken={p.taken}
         />
       ))}
-      {players
+      {!isSpectatorMode && players
         .filter((p) => p.state?.isBot?.())
         .slice(0, PLAYER_COUNT)
         .map(({ state }, idx) => (

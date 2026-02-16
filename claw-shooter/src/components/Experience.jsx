@@ -12,21 +12,47 @@
 
 import { Environment } from "@react-three/drei";
 import { MapVisual, MapLevelDebugColliders, useMapBounds, useSpawnPoints } from "./Map";
-import { useEffect, useRef, useMemo } from "react";
+import { useEffect, useRef, useMemo, useState, useCallback } from "react";
 import { useFrame } from "@react-three/fiber";
-import { Vector3 } from "three";
+import { Vector3, MeshBasicMaterial } from "three";
 
-/** Bullet color by gun type (also used for bloom via emissive). */
+/**
+ * Bullet color by gun type – hex values matching shooter-blitz weapon stats.
+ * These are base colors; for the glowing tracer effect the color is multiplied
+ * by a large scalar on a MeshBasicMaterial (toneMapped=false) so it blooms.
+ */
 const BULLET_COLOR_BY_WEAPON = {
-  pistol: "#facc15",
-  smg: "#22d3ee",
-  shotgun: "#f97316",
-  assault_rifle: "#a855f7",
+  pistol: 0xffff00,
+  smg: 0xff8800,
+  shotgun: 0xff0000,
+  assault_rifle: 0x00ffff,
+  knife: 0x94a3b8,
+};
+
+/** CSS-style fallback colors for trails / non-instanced uses. */
+const BULLET_TRAIL_COLOR = {
+  pistol: "#ffff00",
+  smg: "#ff8800",
+  shotgun: "#ff0000",
+  assault_rifle: "#00ffff",
   knife: "#94a3b8",
 };
+
+/** Bullet box size per weapon – exact match to shooter-blitz reference (width, height, length). */
+const BULLET_SIZE_BY_WEAPON = {
+  smg: [0.03, 0.03, 0.35],
+  default: [0.05, 0.05, 0.5],
+};
+
+/** Color-scalar multiplier for the extreme bloom glow (matches shooter-blitz ×42). */
+const BULLET_COLOR_MULTIPLIER = 42;
+
+/** Scale bullets up so they are visible from spectator camera in the large arena. */
+const BULLET_VISIBLE_SCALE = 5;
 import { CharacterPlayer } from "./CharacterPlayer";
 import { WeaponPickup } from "./WeaponPickup";
 import { BotClickCapture } from "./BotClickCapture";
+import { BulletHit } from "./BulletHit";
 import { useGameManager } from "./GameManager";
 import { Billboard, Text } from "@react-three/drei";
 
@@ -144,15 +170,91 @@ function ServerPlayer({ player, prevPosRef, shots = [] }) {
   );
 }
 
+/** Cache of MeshBasicMaterial per weapon type so we don't recreate on every frame. */
+const bulletMaterialCache = {};
+function getBulletMaterial(weapon) {
+  if (bulletMaterialCache[weapon]) return bulletMaterialCache[weapon];
+  const hex = BULLET_COLOR_BY_WEAPON[weapon] ?? BULLET_COLOR_BY_WEAPON.pistol;
+  const mat = new MeshBasicMaterial({ color: hex, toneMapped: false });
+  mat.color.multiplyScalar(BULLET_COLOR_MULTIPLIER);
+  bulletMaterialCache[weapon] = mat;
+  return mat;
+}
+
+/**
+ * Single server-driven bullet – same visual as shooter-blitz Bullet.jsx:
+ * elongated box tracer, MeshBasicMaterial with color×42, rotation aligned to travel.
+ * Scaled up (BULLET_VISIBLE_SCALE) so projectiles are clearly visible in the arena.
+ */
+function ServerBullet({ bullet }) {
+  const x = bullet.x ?? 0;
+  const y = bullet.y ?? 0;
+  const z = bullet.z ?? 0;
+  if (typeof x !== "number" || typeof y !== "number" || typeof z !== "number") return null;
+
+  const weapon = bullet.weapon || "pistol";
+  const material = getBulletMaterial(weapon);
+  const size = BULLET_SIZE_BY_WEAPON[weapon] ?? BULLET_SIZE_BY_WEAPON.default;
+
+  const fromX = bullet.fromX ?? x;
+  const fromZ = bullet.fromZ ?? z;
+  const dx = x - fromX;
+  const dz = z - fromZ;
+  const len = Math.sqrt(dx * dx + dz * dz) || 1;
+  const angle = Math.atan2(dx / len, dz / len);
+
+  return (
+    <group
+      position={[x, y, z]}
+      rotation-y={angle}
+      scale={BULLET_VISIBLE_SCALE}
+    >
+      <mesh position-z={0.25} material={material} castShadow>
+        <boxGeometry args={size} />
+      </mesh>
+    </group>
+  );
+}
+
+const MAX_IMPACT_EFFECTS = 12;
+const MAX_SEEN_HIT_IDS = 50;
+
 export const Experience = ({ downgradedPerformance = false }) => {
   const { gameState, shots, gamePhase } = useGameManager();
   const prevPosRefs = useRef(new Map());
+  const [impactEffects, setImpactEffects] = useState([]);
+  const seenHitIdsRef = useRef(new Set());
 
   const players = gameState?.players ?? [];
   const pickups = gameState?.pickups ?? [];
   const bullets = gameState?.bullets ?? [];
   const mapBounds = useMapBounds();
   const spawnPoints = useSpawnPoints();
+
+  const bulletY = players.length > 0 ? (players[0].y ?? 0) + 1.5 : 1.5;
+
+  useEffect(() => {
+    const hitShots = (shots || []).filter((s) => s && s.hit === true);
+    const seen = seenHitIdsRef.current;
+    const toAdd = [];
+    for (const shot of hitShots) {
+      if (!shot._id || seen.has(shot._id)) continue;
+      seen.add(shot._id);
+      toAdd.push({ id: shot._id, x: shot.toX, y: bulletY, z: shot.toZ, type: "player" });
+    }
+    while (seen.size > MAX_SEEN_HIT_IDS) {
+      const first = seen.values().next().value;
+      if (first !== undefined) seen.delete(first);
+      else break;
+    }
+    if (toAdd.length > 0) {
+      setImpactEffects((prev) => [...prev, ...toAdd].slice(-MAX_IMPACT_EFFECTS));
+    }
+  }, [shots, bulletY]);
+
+  const removeImpact = useCallback((id) => {
+    setImpactEffects((prev) => prev.filter((e) => e.id !== id));
+  }, []);
 
   for (const p of players) {
     if (!prevPosRefs.current.has(p.id)) {
@@ -176,22 +278,10 @@ export const Experience = ({ downgradedPerformance = false }) => {
         />
       ))}
 
-      {/* Physical bullets: color-coded by gun, emissive for bloom */}
-      {bullets.map((b) => {
-        const weapon = b.weapon || "pistol";
-        const color = BULLET_COLOR_BY_WEAPON[weapon] ?? BULLET_COLOR_BY_WEAPON.pistol;
-        return (
-          <mesh key={b.id} position={[b.x, b.y, b.z]}>
-            <sphereGeometry args={[BULLET_RADIUS * 2, 12, 8]} />
-            <meshStandardMaterial
-              color={color}
-              emissive={color}
-              emissiveIntensity={1.8}
-              toneMapped={false}
-            />
-          </mesh>
-        );
-      })}
+      {/* Physical bullets: elongated box tracers matching shooter-blitz style */}
+      {bullets.map((b) => (
+        <ServerBullet key={b.id} bullet={b} />
+      ))}
 
       {/* Player characters */}
       {players.map((player) => (
@@ -243,40 +333,55 @@ export const Experience = ({ downgradedPerformance = false }) => {
         </>
       )}
 
-      {/* Hit trail effects (when a shot hits) */}
-      {shots.map((shot) => {
-        const bulletY = (players.length > 0 ? (players[0].y ?? 0) : 0) + 1.5;
-        return (
+      {/* Impact trails only (no hitscan lines – bullets are the moving ServerBullet meshes) */}
+      {shots
+        .filter((shot) => shot.hit === true)
+        .map((shot) => (
           <BulletTrail
-            key={shot._id}
+            key={`trail-${shot._id}`}
             fromX={shot.fromX}
             fromZ={shot.fromZ}
             toX={shot.toX}
             toZ={shot.toZ}
-            hit={shot.hit}
+            hit={true}
+            weapon={shot.weapon}
             trailY={bulletY}
           />
-        );
-      })}
+        ))}
+
+      {/* Impact effects (shooter-blitz style BulletHit at impact position) */}
+      {impactEffects.map((impact) => (
+        <BulletHit
+          key={impact.id}
+          nb={60}
+          position={{ x: impact.x, y: impact.y, z: impact.z }}
+          type={impact.type}
+          onEnded={() => removeImpact(impact.id)}
+        />
+      ))}
 
       <Environment preset="sunset" />
     </>
   );
 };
 
-/** Simple bullet trail as a thin line that fades. */
-function BulletTrail({ fromX, fromZ, toX, toZ, hit, trailY = 1.2 }) {
+/** Bullet trail: weapon-colored line that fades. Hit trails are red. */
+function BulletTrail({ fromX, fromZ, toX, toZ, hit, weapon, trailY = 1.2 }) {
   const ref = useRef();
   const opacityRef = useRef(1);
 
   useFrame((_, delta) => {
     if (!ref.current) return;
-    opacityRef.current = Math.max(0, opacityRef.current - delta * 4);
+    opacityRef.current = Math.max(0, opacityRef.current - delta * 2.5);
     ref.current.material.opacity = opacityRef.current;
     if (opacityRef.current <= 0) {
       ref.current.visible = false;
     }
   });
+
+  const color = hit
+    ? "#ff4444"
+    : (BULLET_TRAIL_COLOR[weapon] ?? "#ffff00");
 
   return (
     <line ref={ref}>
@@ -289,7 +394,7 @@ function BulletTrail({ fromX, fromZ, toX, toZ, hit, trailY = 1.2 }) {
         />
       </bufferGeometry>
       <lineBasicMaterial
-        color={hit ? "#ff4444" : "#ffff00"}
+        color={color}
         transparent
         opacity={1}
         linewidth={2}

@@ -320,7 +320,9 @@ export class ShooterEngine {
    *
    * For each moving player we sweep a small sphere in the desired direction.
    * If it collides with the map within (stepDist + skin), we shorten the
-   * movement. We also try per-axis sliding to let players glide along walls.
+   * movement. We also try per-axis sliding to let players glide along walls,
+   * and additionally try diagonal alternatives so bots don't get permanently
+   * stuck against corners or angled walls.
    *
    * The sphere is cast at the capsule's centre height — safely above the
    * floor, so it only detects vertical surfaces (walls, obstacles).
@@ -365,6 +367,39 @@ export class ShooterEngine {
             // Try sliding per-axis
             moveX = this.tryAxisShapeCast(pos.x, pos.y, pos.z, desiredDx, 0, SKIN, body.rigidBody);
             moveZ = this.tryAxisShapeCast(pos.x + moveX, pos.y, pos.z, 0, desiredDz, SKIN, body.rigidBody);
+
+            // If per-axis sliding yielded almost zero movement, try angled alternatives
+            const slideDist = Math.sqrt(moveX * moveX + moveZ * moveZ);
+            if (slideDist < fullDist * 0.15) {
+              const altAngles = [45, -45, 90, -90, 30, -30, 60, -60];
+              for (const offset of altAngles) {
+                const altRad = ((intent.angle + offset) * Math.PI) / 180;
+                const altDx = Math.cos(altRad) * PLAYER_MOVE_SPEED * dt;
+                const altDz = Math.sin(altRad) * PLAYER_MOVE_SPEED * dt;
+                const altDist = Math.sqrt(altDx * altDx + altDz * altDz);
+                if (altDist < 0.001) continue;
+
+                const altDirX = altDx / altDist;
+                const altDirZ = altDz / altDist;
+                const altToi = this.shapeCastHorizontal(
+                  pos.x, pos.y, pos.z, altDirX, altDirZ, altDist + SKIN, body.rigidBody,
+                );
+
+                if (altToi >= altDist + SKIN) {
+                  moveX = altDx;
+                  moveZ = altDz;
+                  break;
+                } else {
+                  const altAllowed = Math.max(0, altToi - SKIN);
+                  if (altAllowed > fullDist * 0.3) {
+                    const altRatio = altAllowed / altDist;
+                    moveX = altDx * altRatio;
+                    moveZ = altDz * altRatio;
+                    break;
+                  }
+                }
+              }
+            }
           } else {
             const ratio = allowedFull / fullDist;
             moveX = desiredDx * ratio;
@@ -593,6 +628,19 @@ export class ShooterEngine {
       });
     }
 
+    // Emit shot event on fire for audio only (no long trail – client draws trail only on impact)
+    const aimRad = (aimAngle * Math.PI) / 180;
+    const muzzleLen = 1.5;
+    this.onShotCallback?.({
+      shooterId: player.id,
+      fromX: player.x,
+      fromZ: player.z,
+      toX: player.x + Math.cos(aimRad) * muzzleLen,
+      toZ: player.z + Math.sin(aimRad) * muzzleLen,
+      weapon: player.weapon,
+      hit: false,
+    });
+
     if (player.ammo !== null && player.ammo <= 0) {
       const depletedGun = player.weapon;
       player.weapon = WEAPON_TYPES.KNIFE;
@@ -669,6 +717,15 @@ export class ShooterEngine {
         });
         bulletsToRemove.add(bullet);
       } else if (hitMap) {
+        this.onShotCallback?.({
+          shooterId: bullet.ownerId,
+          fromX: bullet.fromX,
+          fromZ: bullet.fromZ,
+          toX: pos.x,
+          toZ: pos.z,
+          weapon: bullet.weaponType,
+          hit: true,
+        });
         bulletsToRemove.add(bullet);
       }
     }

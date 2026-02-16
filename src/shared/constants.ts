@@ -33,4 +33,4 @@ export const TICK_RATE = 20; // Ticks per second
 export const TICK_INTERVAL = 1000 / TICK_RATE; // ms per tick
 
 // Rate limiting
-export const MAX_ACTIONS_PER_SECOND = 5;
+export const MAX_ACTIONS_PER_SECOND = 10;

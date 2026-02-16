@@ -83,19 +83,23 @@ export function GameSounds() {
     };
   }, []);
 
-  // New shots → pistol.mp3 per gun type (shotgun = double tap)
+  // New shots → pistol.mp3 per gun (shotgun = double tap). Keep prevShotsLen in sync when array is trimmed.
   useEffect(() => {
     if (!Array.isArray(shots)) return;
     if (shots.length === 0) {
       prevShotsLen.current = 0;
       return;
     }
-    if (shots.length <= prevShotsLen.current) return;
+    if (shots.length <= prevShotsLen.current) {
+      prevShotsLen.current = shots.length;
+      return;
+    }
     const from = prevShotsLen.current;
     prevShotsLen.current = shots.length;
     for (let i = from; i < shots.length; i++) {
       const weapon = shots[i]?.weapon;
-      if (weapon && weapon !== "knife") playGunshot(weapon, gunshotVol);
+      if (weapon === "knife") continue;
+      playGunshot(weapon || "pistol", gunshotVol);
     }
   }, [shots?.length, shots]);
 

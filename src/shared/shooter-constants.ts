@@ -119,7 +119,7 @@ export const TICK_RATE = 20;
 export const TICK_INTERVAL_MS = 1000 / TICK_RATE; // 50ms
 
 // ── Rate limiting ──────────────────────────────────────────────────
-export const MAX_ACTIONS_PER_SECOND = 5;
+export const MAX_ACTIONS_PER_SECOND = 10;
 
 // ── Physical bullets ────────────────────────────────────────────────
 export const BULLET_RADIUS = 0.08;

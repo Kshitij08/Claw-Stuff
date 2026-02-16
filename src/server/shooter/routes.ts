@@ -138,7 +138,7 @@ export function createShooterRoutes(matchManager: ShooterMatchManager): Router {
       res.status(429).json({
         success: false,
         error: 'RATE_LIMITED',
-        message: 'Max 5 actions per second',
+        message: 'Max 10 actions per second',
         retryAfterMs: rl.retryAfterMs,
       });
       return;

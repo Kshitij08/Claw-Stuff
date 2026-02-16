@@ -33,7 +33,12 @@ const WEAPON_TIER = {
 
 const PICKUP_RADIUS = 1.5;
 /** Use a slightly larger radius to decide to send pickup (avoids running past before next tick). */
-const PICKUP_RADIUS_EARLY = 2.2;
+const PICKUP_RADIUS_EARLY = 2.5;
+
+const ARENA_MIN_X = -45;
+const ARENA_MAX_X = 45;
+const ARENA_MIN_Z = -45;
+const ARENA_MAX_Z = 45;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -85,6 +90,17 @@ function weaponDps(weapon) {
   const s = WEAPON_STATS[weapon];
   if (!s) return 0;
   return (s.damage * s.pellets) / (s.fireRate / 1000);
+}
+
+function clampToArena(x, z, margin = 2) {
+  return {
+    x: Math.max(ARENA_MIN_X + margin, Math.min(ARENA_MAX_X - margin, x)),
+    z: Math.max(ARENA_MIN_Z + margin, Math.min(ARENA_MAX_Z - margin, z)),
+  };
+}
+
+function randomArenaAngle() {
+  return Math.random() * 360;
 }
 
 // ─── Personality presets ────────────────────────────────────────────────────
@@ -208,28 +224,23 @@ function scoreEnemy(me, enemy, personality, allEnemies) {
 
   let score = 0;
 
-  // Distance factor — closer = higher score (aggressive)
   const maxArena = 90;
   const distNorm = 1 - Math.min(dist / maxArena, 1);
   score += distNorm * personality.aggression * 40;
 
-  // Health factor — lower health = easier kill
   const healthNorm = 1 - enemy.health / 100;
   score += healthNorm * 30;
 
-  // Lives factor — fewer lives = closer to elimination
   const livesNorm = 1 - (enemy.lives ?? 3) / 3;
   score += livesNorm * 15;
 
-  // Weapon threat — enemies with knife are less dangerous
   const enemyTier = WEAPON_TIER[enemy.weapon] ?? 1;
   if (!isGun(enemy.weapon)) {
-    score += 10; // unarmed enemies are easier targets
+    score += 10;
   } else {
-    score -= enemyTier * 2; // armed enemies are slightly less attractive unless personality says otherwise
+    score -= enemyTier * 2;
   }
 
-  // Personality-specific bonuses
   switch (personality.targetPreference) {
     case 'nearest':
       score += distNorm * 25;
@@ -279,22 +290,16 @@ function scorePickup(me, pickup, enemies, personality) {
   const tier = WEAPON_TIER[pickup.type] ?? 1;
   const myTier = WEAPON_TIER[me.weapon] ?? 1;
 
-  // Don't grab if current weapon is better
   if (myTier >= tier) return -100;
 
   let score = 0;
 
-  // Tier improvement
   score += (tier - myTier) * 20;
-
-  // Distance penalty
   score -= dist * 1.5;
 
-  // Danger check — enemies near the pickup
   const nearbyEnemies = enemies.filter((e) => distance(e, pickup) < 10).length;
   score -= nearbyEnemies * 8 * (1 - personality.aggression);
 
-  // Personality weapon hunger
   score *= (0.5 + personality.weaponHunger);
 
   return score;
@@ -315,30 +320,30 @@ function selectBestPickup(me, pickups, enemies, personality) {
   }
 
   if (bestScore > 0) return best;
-  // When we have knife, always return best by tier/distance even if score is negative (go get a gun)
   const hasGun = isGun(me.weapon);
   return hasGun ? null : best;
 }
 
-/** Nearest weapon pickup by distance (used when selectBestPickup returns null). */
 function getNearestPickup(me, pickups) {
   if (pickups.length === 0) return null;
   return pickups.reduce((a, b) => (distance(me, a) < distance(me, b) ? a : b));
 }
 
-// ─── Anti-stuck detection ───────────────────────────────────────────────────
+// ─── Anti-stuck detection (improved: faster detection, smarter recovery) ────
 
 class StuckDetector {
-  constructor(bufferSize = 12, threshold = 1.5) {
+  constructor(bufferSize = 6, threshold = 0.8) {
     this.buffer = [];
     this.bufferSize = bufferSize;
     this.threshold = threshold;
     this.wanderUntil = 0;
     this.wanderAngle = 0;
+    this.wanderAttempts = 0;
+    this.lastTriedAngles = [];
   }
 
   push(x, z) {
-    this.buffer.push({ x, z });
+    this.buffer.push({ x, z, t: Date.now() });
     if (this.buffer.length > this.bufferSize) {
       this.buffer.shift();
     }
@@ -357,23 +362,38 @@ class StuckDetector {
     return maxDist < this.threshold;
   }
 
-  startWander(currentAngle) {
-    const offset = 90 + Math.random() * 180;
-    this.wanderAngle = normalizeAngle(currentAngle + (Math.random() > 0.5 ? offset : -offset));
-    this.wanderUntil = Date.now() + 1500 + Math.random() * 1000;
+  startWander(currentAngle, targetPos = null, myPos = null) {
+    this.wanderAttempts++;
+
+    if (targetPos && myPos && this.wanderAttempts <= 8) {
+      const directAngle = angleTo(myPos, targetPos);
+      const offsets = [90, -90, 135, -135, 45, -45, 160, -160];
+      const tryIdx = (this.wanderAttempts - 1) % offsets.length;
+      this.wanderAngle = normalizeAngle(directAngle + offsets[tryIdx]);
+    } else {
+      const offset = 60 + Math.random() * 240;
+      this.wanderAngle = normalizeAngle(currentAngle + offset);
+    }
+
+    this.lastTriedAngles.push(this.wanderAngle);
+    if (this.lastTriedAngles.length > 8) this.lastTriedAngles.shift();
+
+    const duration = 600 + Math.min(this.wanderAttempts * 200, 1200) + Math.random() * 400;
+    this.wanderUntil = Date.now() + duration;
     this.buffer = [];
   }
 
   isWandering() {
     return Date.now() < this.wanderUntil;
   }
+
+  resetWanderAttempts() {
+    this.wanderAttempts = 0;
+    this.lastTriedAngles = [];
+  }
 }
 
 // ─── Strafe behaviours ──────────────────────────────────────────────────────
-
-let zigzagFlip = 1;
-let erraticTimer = 0;
-let erraticAngle = 0;
 
 function getStrafeAngle(angleToTarget, personality, tick) {
   switch (personality.strafeBehavior) {
@@ -381,58 +401,89 @@ function getStrafeAngle(angleToTarget, personality, tick) {
       return angleToTarget;
 
     case 'circle-strafe':
-      return angleToTarget + 75;
+      return angleToTarget + (tick % 10 < 5 ? 75 : -75);
 
     case 'kite-back':
       return normalizeAngle(angleToTarget + 180);
 
-    case 'zigzag':
-      if (tick % 6 === 0) zigzagFlip *= -1;
-      return angleToTarget + 60 * zigzagFlip;
+    case 'zigzag': {
+      const flip = (Math.floor(tick / 4) % 2 === 0) ? 1 : -1;
+      return angleToTarget + 55 * flip;
+    }
 
-    case 'erratic':
-      if (tick % 4 === 0 || erraticTimer <= 0) {
-        erraticAngle = angleToTarget + (Math.random() - 0.5) * 160;
-        erraticTimer = 3 + Math.floor(Math.random() * 4);
-      }
-      erraticTimer--;
-      return erraticAngle;
+    case 'erratic': {
+      const phase = Math.floor(tick / 3) % 4;
+      const offsets = [0, 80, -60, 140];
+      return angleToTarget + offsets[phase] + (Math.random() - 0.5) * 40;
+    }
 
     default:
       return angleToTarget;
   }
 }
 
-// ─── Evasion vs ranged enemies when we only have knife ──────────────────────
+// ─── Obstacle-aware movement ────────────────────────────────────────────────
 
-let evasionStartTime = 0;
-const MAX_EVASION_MS = 3000;
+class MovementTracker {
+  constructor() {
+    this.lastPos = null;
+    this.consecutiveStalls = 0;
+    this.lastMoveAngle = null;
+  }
 
-function getEvasionAngle(me, enemy) {
-  const toEnemy = angleTo(me, enemy);
-  const offset = 70 + Math.random() * 20;
-  return normalizeAngle(toEnemy + (Math.random() > 0.5 ? offset : -offset));
+  update(x, z) {
+    if (this.lastPos) {
+      const moved = distance({ x, z: z }, this.lastPos);
+      if (moved < 0.15 && this.lastMoveAngle !== null) {
+        this.consecutiveStalls++;
+      } else {
+        this.consecutiveStalls = 0;
+      }
+    }
+    this.lastPos = { x, z };
+  }
+
+  isBlockedByWall() {
+    return this.consecutiveStalls >= 2;
+  }
+
+  getAlternateAngle(desiredAngle) {
+    const stalls = this.consecutiveStalls;
+    if (stalls < 2) return desiredAngle;
+
+    const offsets = [45, -45, 90, -90, 135, -135, 30, -30];
+    const idx = (stalls - 2) % offsets.length;
+    return normalizeAngle(desiredAngle + offsets[idx]);
+  }
+
+  setMoveAngle(angle) {
+    this.lastMoveAngle = angle;
+  }
 }
 
 // ─── Decision engine ────────────────────────────────────────────────────────
 
-function decide(me, state, personality, stuckDetector, tick, retreatUntil) {
-  // Treat any player not explicitly dead as a valid target (server may omit .alive sometimes)
-  const enemies = (state.players || []).filter((p) => p != null && p.alive !== false);
+function decide(me, state, personality, stuckDetector, movementTracker, tick, retreatUntil) {
+  const enemies = (state.players || []).filter(
+    (p) => p != null && p.alive === true && !p.eliminated,
+  );
   const pickups = state.weaponPickups || [];
   const now = Date.now();
 
-  // ── Anti-stuck: override everything (but not during melee combat) ──
+  movementTracker.update(me.x, me.z);
   stuckDetector.push(me.x, me.z);
 
-  // Don't trigger anti-stuck if an enemy is within combat range — we're fighting
   const nearestEnemyDist = enemies.length > 0
     ? enemies.reduce((min, e) => Math.min(min, distance(me, e)), Infinity)
     : Infinity;
-  const inCombatRange = nearestEnemyDist < 10;
+  const inCombatRange = nearestEnemyDist < 6;
 
   if (stuckDetector.isWandering() && !inCombatRange) {
     return { type: 'move', angle: stuckDetector.wanderAngle };
+  }
+
+  if (!inCombatRange && nearestEnemyDist > 3) {
+    stuckDetector.resetWanderAttempts();
   }
 
   if (stuckDetector.isStuck() && !inCombatRange) {
@@ -440,14 +491,11 @@ function decide(me, state, personality, stuckDetector, tick, retreatUntil) {
       ? pickups.reduce((a, b) => (distance(me, a) < distance(me, b) ? a : b))
       : null;
 
-    if (nearestPickup && distance(me, nearestPickup) < 40) {
-      stuckDetector.wanderAngle = angleTo(me, nearestPickup);
-      stuckDetector.wanderUntil = now + 2000;
-      stuckDetector.buffer = [];
-      return { type: 'move', angle: stuckDetector.wanderAngle };
-    }
+    const target = enemies.length > 0
+      ? selectTarget(me, enemies, personality) || enemies[0]
+      : nearestPickup;
 
-    stuckDetector.startWander(me.angle);
+    stuckDetector.startWander(me.angle, target, me);
     return { type: 'move', angle: stuckDetector.wanderAngle };
   }
 
@@ -468,7 +516,7 @@ function decide(me, state, personality, stuckDetector, tick, retreatUntil) {
     me.health > 0 &&
     enemies.length > 0
   ) {
-    retreatUntil.value = now + 1500;
+    retreatUntil.value = now + 1200;
     const nearest = enemies.reduce((a, b) => (distance(me, a) < distance(me, b) ? a : b));
     const away = normalizeAngle(angleTo(me, nearest) + 180);
     return { type: 'move', angle: away };
@@ -495,29 +543,30 @@ function decide(me, state, personality, stuckDetector, tick, retreatUntil) {
     if (bestPickup) {
       const pickupDist = distance(me, bestPickup);
 
-      // Close enough to grab (use early radius so we don't run past)
       if (pickupDist < PICKUP_RADIUS_EARLY) {
         return { type: 'pickup' };
       }
 
-      // Decide: go for weapon or fight?
       const nearestEnemy = enemies.length > 0
         ? enemies.reduce((a, b) => (distance(me, a) < distance(me, b) ? a : b))
         : null;
-      const nearestEnemyDist = nearestEnemy ? distance(me, nearestEnemy) : Infinity;
+      const nearestEnemyDist2 = nearestEnemy ? distance(me, nearestEnemy) : Infinity;
 
-      // If enemy is very close and we're melee-comfortable, fight first
       const fightFirst = nearestEnemy &&
-        nearestEnemyDist < 4 &&
+        nearestEnemyDist2 < 3.5 &&
         personality.meleeComfort > 0.6;
 
       if (!fightFirst) {
-        return { type: 'move', angle: angleTo(me, bestPickup) };
+        let moveAngle = angleTo(me, bestPickup);
+        if (movementTracker.isBlockedByWall()) {
+          moveAngle = movementTracker.getAlternateAngle(moveAngle);
+        }
+        return { type: 'move', angle: moveAngle };
       }
     }
   }
 
-  // Mid-fight pickup grab: if we walk over a better weapon, grab it
+  // Mid-fight pickup grab
   if (hasGun && pickups.length > 0) {
     const nearbyUpgrade = pickups.find((p) => {
       if (distance(me, p) > PICKUP_RADIUS_EARLY) return false;
@@ -528,16 +577,32 @@ function decide(me, state, personality, stuckDetector, tick, retreatUntil) {
     }
   }
 
-  // ── No enemies? Wander toward pickups or roam ──
+  // ── No enemies? Wander toward pickups or roam aggressively ──
   if (enemies.length === 0) {
-    if (pickups.length > 0) {
+    if (pickups.length > 0 && !hasGun) {
       const nearest = pickups.reduce((a, b) => (distance(me, a) < distance(me, b) ? a : b));
       if (distance(me, nearest) < PICKUP_RADIUS_EARLY) {
         return { type: 'pickup' };
       }
-      return { type: 'move', angle: angleTo(me, nearest) };
+      let moveAngle = angleTo(me, nearest);
+      if (movementTracker.isBlockedByWall()) {
+        moveAngle = movementTracker.getAlternateAngle(moveAngle);
+      }
+      return { type: 'move', angle: moveAngle };
     }
-    return { type: 'move', angle: normalizeAngle(me.angle + 15) };
+
+    // Roam toward center or a random direction to find enemies
+    const distToCenter = distance(me, { x: 0, z: 0 });
+    if (distToCenter > 25) {
+      let moveAngle = angleTo(me, { x: 0, z: 0 });
+      if (movementTracker.isBlockedByWall()) {
+        moveAngle = movementTracker.getAlternateAngle(moveAngle);
+      }
+      return { type: 'move', angle: moveAngle };
+    }
+
+    const roamAngle = (tick * 37 + Math.random() * 60) % 360;
+    return { type: 'move', angle: roamAngle };
   }
 
   // ── Select target ──
@@ -546,7 +611,8 @@ function decide(me, state, personality, stuckDetector, tick, retreatUntil) {
     target = enemies.reduce((a, b) => (distance(me, a) < distance(me, b) ? a : b));
   }
   if (!target) {
-    return { type: 'move', angle: normalizeAngle(me.angle + 15) };
+    const roamAngle = (tick * 37 + Math.random() * 60) % 360;
+    return { type: 'move', angle: roamAngle };
   }
 
   const dist = distance(me, target);
@@ -555,30 +621,17 @@ function decide(me, state, personality, stuckDetector, tick, retreatUntil) {
   const myRange = weaponRange(myWeapon);
 
   // ── Evasion: we have knife, enemy has gun and is close-ish ──
-  // High meleeComfort agents (Berserker, Psychopath) skip evasion and just charge
-  if (!isGun(myWeapon) && isGun(target.weapon) && dist < 20 && dist > 3 && personality.meleeComfort < 0.7) {
-    if (evasionStartTime === 0) evasionStartTime = now;
-    const evading = now - evasionStartTime < MAX_EVASION_MS;
-
-    if (evading) {
-      // Strafe toward the target at an angle to close distance while dodging
-      const evasionAngle = getEvasionAngle(me, target);
-      return { type: 'move', angle: evasionAngle };
-    } else {
-      evasionStartTime = 0;
-      // Time's up — charge!
-    }
-  } else {
-    evasionStartTime = 0;
+  if (!isGun(myWeapon) && isGun(target.weapon) && dist < 15 && dist > 3 && personality.meleeComfort < 0.7) {
+    const evasionAngle = toTarget + (tick % 2 === 0 ? 65 : -65);
+    return { type: 'move', angle: normalizeAngle(evasionAngle) };
   }
 
   // ── In range: attack! ──
-  if (dist <= myRange || (myWeapon === 'knife' && dist <= 2.5)) {
+  if (dist <= myRange || (myWeapon === 'knife' && dist <= 2.8)) {
     if (myWeapon === 'knife') {
       return { type: 'melee', moveAngle: toTarget };
     }
 
-    // Ammo conservation: skip low-probability shots at long range
     const ammoRatio = me.ammo !== null ? me.ammo / (WEAPON_STATS[myWeapon]?.ammo ?? 10) : 1;
     const longRange = dist > myRange * 0.7;
     if (longRange && ammoRatio < 0.3 && personality.ammoConservation > 0.7) {
@@ -589,9 +642,8 @@ function decide(me, state, personality, stuckDetector, tick, retreatUntil) {
     return { type: 'shoot', aimAngle: toTarget, moveAngle: strafeAngle };
   }
 
-  // ── Out of range: close the gap ──
-  // If we have a gun and target is within reasonable range, shoot while approaching
-  if (isGun(myWeapon) && dist <= myRange * 1.2) {
+  // ── Out of range: close the gap (shoot while approaching if we have a gun) ──
+  if (isGun(myWeapon) && dist <= myRange * 1.3) {
     const strafeAngle = getStrafeAngle(toTarget, personality, tick);
     return { type: 'shoot', aimAngle: toTarget, moveAngle: strafeAngle };
   }
@@ -609,7 +661,12 @@ function decide(me, state, personality, stuckDetector, tick, retreatUntil) {
     }
   }
 
-  return { type: 'move', angle: toTarget };
+  // Move toward the target, with wall avoidance
+  let moveAngle = toTarget;
+  if (movementTracker.isBlockedByWall()) {
+    moveAngle = movementTracker.getAlternateAngle(toTarget);
+  }
+  return { type: 'move', angle: moveAngle };
 }
 
 // ─── Main game loop ─────────────────────────────────────────────────────────
@@ -667,9 +724,12 @@ export async function runShooterAgent(agentConfig, personality, baseUrl, options
 
   // ── Game loop ──
   const stuckDetector = new StuckDetector();
+  const movementTracker = new MovementTracker();
   const retreatUntil = { value: 0 };
   let tick = 0;
   let lastKills = 0;
+
+  const TICK_SLEEP = 150;
 
   while (true) {
     try {
@@ -688,26 +748,23 @@ export async function runShooterAgent(agentConfig, personality, baseUrl, options
         break;
       }
 
-      // Eliminated
       if (me.lives <= 0 && !me.alive) {
         log(`Eliminated. Kills: ${me.kills}, Deaths: ${me.deaths}`);
         break;
       }
 
-      // Dead but respawning
       if (!me.alive) {
-        await sleep(300);
+        await sleep(200);
         continue;
       }
 
       tick++;
 
-      // Make decision
-      const action = decide(me, state, personality, stuckDetector, tick, retreatUntil);
+      const action = decide(me, state, personality, stuckDetector, movementTracker, tick, retreatUntil);
 
-      // Execute action(s) — can send up to 5/sec, but we do 1-2 per cycle
       switch (action.type) {
         case 'move':
+          movementTracker.setMoveAngle(action.angle);
           await fetch(`${baseUrl}/api/shooter/action`, {
             method: 'POST',
             headers: HEADERS,
@@ -716,13 +773,13 @@ export async function runShooterAgent(agentConfig, personality, baseUrl, options
           break;
 
         case 'shoot':
-          // Move + shoot in same cycle
           if (action.moveAngle !== undefined) {
-            await fetch(`${baseUrl}/api/shooter/action`, {
+            movementTracker.setMoveAngle(action.moveAngle);
+            fetch(`${baseUrl}/api/shooter/action`, {
               method: 'POST',
               headers: HEADERS,
               body: JSON.stringify({ action: 'move', angle: action.moveAngle }),
-            });
+            }).catch(() => {});
           }
           await fetch(`${baseUrl}/api/shooter/action`, {
             method: 'POST',
@@ -733,11 +790,12 @@ export async function runShooterAgent(agentConfig, personality, baseUrl, options
 
         case 'melee':
           if (action.moveAngle !== undefined) {
-            await fetch(`${baseUrl}/api/shooter/action`, {
+            movementTracker.setMoveAngle(action.moveAngle);
+            fetch(`${baseUrl}/api/shooter/action`, {
               method: 'POST',
               headers: HEADERS,
               body: JSON.stringify({ action: 'move', angle: action.moveAngle }),
-            });
+            }).catch(() => {});
           }
           await fetch(`${baseUrl}/api/shooter/action`, {
             method: 'POST',
@@ -763,7 +821,6 @@ export async function runShooterAgent(agentConfig, personality, baseUrl, options
           break;
       }
 
-      // Logging
       if (tick % 15 === 0 || me.kills !== lastKills) {
         const enemies = (state.players || []).filter((p) => p.alive);
         const nearestDist = enemies.length > 0
@@ -776,11 +833,12 @@ export async function runShooterAgent(agentConfig, personality, baseUrl, options
           `K=${me.kills} D=${me.deaths}`,
           `Near=${nearestDist}m`,
           `Act=${action.type}`,
+          `Stalls=${movementTracker.consecutiveStalls}`,
         );
         lastKills = me.kills;
       }
 
-      await sleep(200);
+      await sleep(TICK_SLEEP);
     } catch (err) {
       if (!quiet) console.error(prefix, 'Error:', err.message || err);
       await sleep(1000);

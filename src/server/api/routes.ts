@@ -275,7 +275,7 @@ export function createRoutes(matchManager: MatchManager): Router {
       res.status(429).json({
         success: false,
         error: 'RATE_LIMITED',
-        message: 'Max 5 actions per second',
+        message: 'Max 10 actions per second',
         retryAfterMs: rateCheck.retryAfterMs,
       });
       return;

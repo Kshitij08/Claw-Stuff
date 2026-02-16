@@ -32,8 +32,9 @@ const DEFAULT_CHARACTER = "G_1";
 /** Bot skins: G_1.glb through G_10.glb */
 const BOT_CHARACTERS = Array.from({ length: 10 }, (_, i) => `G_${i + 1}`);
 
-const BG_MUSIC_URL = "/claw-shooter/sounds/bg music.mp3";
-const KNIFE_STAB_URL = "/claw-shooter/sounds/knife stab.mp3";
+const BASE = import.meta.env.BASE_URL || "/claw-shooter/";
+const BG_MUSIC_URL = `${BASE}sounds/bg music.mp3`;
+const KNIFE_STAB_URL = `${BASE}sounds/knife stab.mp3`;
 
 export const Experience = ({ downgradedPerformance = false }) => {
   const [players, setPlayers] = useState([]);

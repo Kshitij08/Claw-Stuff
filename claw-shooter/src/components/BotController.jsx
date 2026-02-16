@@ -530,7 +530,7 @@ export const BotController = ({
 
     if (gamePhase === "playing") {
       try {
-        const audio = new Audio("/sounds/death.mp3");
+        const audio = new Audio(`${import.meta.env.BASE_URL || "/claw-shooter/"}sounds/death.mp3`);
         audio.volume = 0.5;
         audio.play();
       } catch (_) {}

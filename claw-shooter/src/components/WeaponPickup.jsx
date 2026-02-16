@@ -7,11 +7,12 @@ import { WEAPON_STATS } from "../constants/weapons";
 
 const BASE = import.meta.env.BASE_URL;
 
+/** Filenames match public/claw-shooter: Pistol.glb, Smg.glb, Shotgun.glb, Rifle.glb (capital first letter) */
 const WEAPON_MODEL = {
-  pistol: `${BASE}pistol.glb`,
-  smg: `${BASE}smg.glb`,
-  shotgun: `${BASE}shotgun.glb`,
-  assault_rifle: `${BASE}rifle.glb`,
+  pistol: `${BASE}Pistol.glb`,
+  smg: `${BASE}Smg.glb`,
+  shotgun: `${BASE}Shotgun.glb`,
+  assault_rifle: `${BASE}Rifle.glb`,
 };
 
 const LABELS = {
@@ -21,7 +22,6 @@ const LABELS = {
   assault_rifle: "Assault Rifle",
 };
 
-/** Scale and vertical offset so gun models sit nicely on the ground. */
 const PICKUP_SCALE = 4;
 const PICKUP_HEIGHT = 0.5;
 
@@ -41,7 +41,7 @@ export function WeaponPickup({ id, weaponType, position, taken }) {
   const sceneClone = useMemo(() => gltf.scene.clone(true), [gltf.scene]);
   const coneRef = useRef(null);
 
-  useFrame((_, delta) => {
+  useFrame(() => {
     if (coneRef.current) {
       const t = (Date.now() / 1000) * Math.PI * 0.8;
       const s = 1 + 0.25 * Math.sin(t);
@@ -74,18 +74,17 @@ export function WeaponPickup({ id, weaponType, position, taken }) {
         <group position={[0, PICKUP_HEIGHT, 0]} scale={PICKUP_SCALE}>
           <primitive object={sceneClone} />
         </group>
-        {/* Glowing cone (tip up) to indicate pickup; scales 75%–125% */}
         <group ref={coneRef} position={[0, 3.2, 0]}>
           <mesh rotation={[Math.PI, 0, 0]}>
             <coneGeometry args={[0.6, 1.2, 16]} />
             <meshStandardMaterial
-            color={color}
-            emissive={color}
-            emissiveIntensity={0.9}
-            transparent
-            opacity={0.85}
-            toneMapped={false}
-          />
+              color={color}
+              emissive={color}
+              emissiveIntensity={0.9}
+              transparent
+              opacity={0.85}
+              toneMapped={false}
+            />
           </mesh>
         </group>
         <Text

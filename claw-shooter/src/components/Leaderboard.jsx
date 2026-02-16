@@ -7,12 +7,18 @@ const SHOOTER_SPECTATOR_URL = "/api/shooter/match/spectator";
 const POLL_INTERVAL_MS = 1500;
 const SPECTATOR_POLL_MS = 150;
 
-/** API base: use VITE_API_URL in dev (e.g. http://localhost:3000) so countdown/spectator work when app runs on another port */
+/** API base for shooter status/spectator. On localhost, if the app is not on port 3000 we use :3000 so the backend is reached without setting env. */
 function getApiBase() {
   if (typeof window === "undefined") return "";
   const env = import.meta.env?.VITE_API_URL;
   if (env && typeof env === "string" && env.trim()) return env.trim().replace(/\/$/, "");
-  return window.location.origin;
+  const origin = window.location.origin;
+  const hostname = window.location.hostname || "";
+  const port = window.location.port || (window.location.protocol === "https:" ? "443" : "80");
+  if (hostname === "localhost" && port !== "3000") {
+    return `${window.location.protocol}//localhost:3000`;
+  }
+  return origin;
 }
 
 function formatSurvival(seconds) {
@@ -26,6 +32,7 @@ export const Leaderboard = () => {
   // Server-driven shooter status (spectator view)
   const [serverStatus, setServerStatus] = useState(null);
   const [countdownSeconds, setCountdownSeconds] = useState(null);
+  const [apiError, setApiError] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -33,11 +40,20 @@ export const Leaderboard = () => {
     const fetchStatus = async () => {
       try {
         const res = await fetch(`${base}${SHOOTER_STATUS_URL}`);
-        if (!res.ok || cancelled) return;
+        if (cancelled) return;
+        if (!res.ok) {
+          setApiError(`Status ${res.status} from ${base}${SHOOTER_STATUS_URL}`);
+          setServerStatus(null);
+          return;
+        }
+        setApiError(null);
         const data = await res.json();
         if (!cancelled) setServerStatus(data);
-      } catch {
-        if (!cancelled) setServerStatus(null);
+      } catch (err) {
+        if (!cancelled) {
+          setApiError(err?.message || "Cannot reach server. Is the backend running on port 3000?");
+          setServerStatus(null);
+        }
       }
     };
     fetchStatus();
@@ -186,8 +202,20 @@ export const Leaderboard = () => {
 
   return (
     <>
+      {/* Connection error when we can't reach the API */}
+      {apiError && !showServerCountdown && !showServerActive && (
+        <div className="fixed inset-0 z-20 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <h1 className="text-2xl font-bold text-white mb-4">Claw Shooter</h1>
+          <p className="text-red-300 text-center max-w-lg mb-2">{apiError}</p>
+          <p className="text-white/70 text-sm text-center max-w-md">
+            Start the backend with <code className="bg-white/10 px-1 rounded">npm run dev</code>, then open{" "}
+            <code className="bg-white/10 px-1 rounded">http://localhost:3000/claw-shooter/</code> or ensure the API is running on port 3000.
+          </p>
+        </div>
+      )}
+
       {/* Server-driven spectator UI: lobby */}
-      {showServerLobby && !showServerCountdown && !showServerActive && (
+      {showServerLobby && !showServerCountdown && !showServerActive && !apiError && (
         <div className="fixed inset-0 z-20 flex flex-col items-center justify-center bg-black/70 backdrop-blur-sm">
           <h1 className="text-3xl font-bold text-white mb-8">Claw Shooter</h1>
           <p className="text-white/90 text-center max-w-md mb-4">
@@ -202,6 +230,7 @@ export const Leaderboard = () => {
           <p className="text-white/70 text-sm text-center max-w-md">
             This view is spectator-only. Use the Claw IO API (/api/shooter/*) to run agents.
           </p>
+          <p className="text-white/50 text-xs mt-4">Run 2+ shooter agents to see the countdown and match.</p>
         </div>
       )}
 

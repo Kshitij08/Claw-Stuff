@@ -13,17 +13,13 @@ import { RightPanel } from "./components/RightPanel";
 import { GameManagerProvider } from "./components/GameManager";
 import { SpectatorCamera } from "./components/SpectatorCamera";
 import { GameSounds } from "./components/GameSounds";
+import { Experience } from "./components/Experience";
 
 /**
  * Claw Shooter: server-only. Game runs on the server; agents use REST API (or Python scripts).
- * This UI is spectator-only. We call insertCoin once so Playroom hooks (SpectatorCamera, RightPanel) don't break;
- * no bots are added – the 3D scene is driven only by server state.
+ * This UI is spectator-only; the 3D scene is driven by server state via Socket.IO (GameManager).
  */
 function App() {
-  useEffect(() => {
-    insertCoin({ skipLobby: true, enableBots: false, maxPlayersPerRoom: 2 });
-  }, []);
-
   return (
     <>
       <Loader />

@@ -32,8 +32,8 @@ export const WEAPON_STATS: Record<string, WeaponStats> = {
   [WEAPON_TYPES.KNIFE]: {
     type: WEAPON_TYPES.KNIFE,
     damage: 25,
-    fireRate: 600,
-    range: 1.5,
+    fireRate: 400,
+    range: 3.5,
     ammo: null,
     isMelee: true,
   },
@@ -82,7 +82,7 @@ export const MAP_BOUNDS = {
   maxZ: 45,
 };
 
-export const MOVEMENT_SPEED = 120 / 1000; // units per ms (reduced so agents don't teleport with latency)
+export const MOVEMENT_SPEED = 12 / 1000; // units per ms – slower for better combat pacing (arena cross ≈7.5 s)
 export const TICK_MS = 50; // 20 ticks per second
 
 export const SHOOTER_LOBBY_DURATION = 5 * 1000; // 5s countdown after 2nd join
@@ -93,9 +93,22 @@ export const SHOOTER_BETTING_CLOSE_BEFORE_START = 10 * 1000; // close betting 10
 export const MAX_SHOOTER_PLAYERS = 10;
 export const MAX_ACTIONS_PER_SECOND = 10;
 
+/** Collision radius for player-player push-apart */
+export const PLAYER_COLLISION_RADIUS = 1.5;
+
 /** Minimum distance between player spawn points */
 export const MIN_SPAWN_SEPARATION = 4;
 /** Number of weapon pickups at match start */
 export const INITIAL_WEAPON_PICKUPS = 5;
 export const MIN_DISTANCE_GUN_FROM_PLAYER = 6;
 export const MIN_DISTANCE_GUN_FROM_GUN = 3;
+
+/** Path to map GLB for server-side Rapier physics (relative to project root) */
+export const MAP_GLB_PRIMARY = 'public/claw-shooter/map4.glb';
+export const MAP_GLB_FALLBACK = 'public/claw-shooter/map.glb';
+
+/** Play area width/height in world units (must match client Map.jsx PLAY_AREA_SIZE) */
+export const PLAY_AREA_SIZE = 90;
+
+/** Player capsule half-height for Rapier collider (y-axis) */
+export const PLAYER_CAPSULE_HALF_HEIGHT = 0.5;

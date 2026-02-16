@@ -23,6 +23,15 @@ function angleTo(x1, z1, x2, z2) {
   return Math.atan2(x2 - x1, z2 - z1);
 }
 
+/** Server weapon ranges (keep in sync with constants.ts WEAPON_STATS) */
+const WEAPON_RANGES = {
+  knife: 3.5,
+  pistol: 50,
+  smg: 45,
+  shotgun: 25,
+  assault_rifle: 55,
+};
+
 /** Parse JSON from response; throw clear error if server returned HTML (e.g. 404 or wrong base URL). */
 async function parseJsonResponse(res, url) {
   const contentType = res.headers.get('content-type') || '';
@@ -118,6 +127,10 @@ export async function runShooterAgent({ key, name }, baseUrl, options = {}) {
       let targetAngle = myAngle;
       let shouldShoot = false;
 
+      const myWeapon = me.weapon || 'knife';
+      const hasGun = myWeapon !== 'knife';
+      const weaponRange = WEAPON_RANGES[myWeapon] || 3.5;
+
       const enemies = (state.players || []).filter((p) => p.alive);
       let nearestEnemy = null;
       let nearestEnemyDist = Infinity;
@@ -140,15 +153,31 @@ export async function runShooterAgent({ key, name }, baseUrl, options = {}) {
         }
       }
 
-      const shootRange = 25;
-      if (nearestEnemy && nearestEnemyDist < shootRange) {
+      let shouldMove = true;
+
+      // Priority: pick up a gun if we only have knife AND a pickup is reasonably close
+      if (!hasGun && nearestPickup && nearestPickupDist < 60) {
+        targetAngle = angleTo(myX, myZ, nearestPickup.x, nearestPickup.z);
+        // Still knife-swing if enemy very close
+        if (nearestEnemy && nearestEnemyDist < weaponRange) {
+          shouldShoot = true;
+        }
+      } else if (nearestEnemy && nearestEnemyDist < weaponRange) {
+        // In weapon range -> face enemy and shoot while moving toward them
         targetAngle = angleTo(myX, myZ, nearestEnemy.x, nearestEnemy.z);
         shouldShoot = true;
+        // Only stop briefly at very close range with a gun (< 5 units)
+        if (hasGun && nearestEnemyDist < 5) {
+          shouldMove = false;
+        }
+      } else if (nearestEnemy && nearestEnemyDist < weaponRange + 8) {
+        // Close to weapon range -> move toward and pre-aim
+        targetAngle = angleTo(myX, myZ, nearestEnemy.x, nearestEnemy.z);
+        if (nearestEnemyDist < weaponRange + 3) shouldShoot = true;
       } else if (nearestPickup && nearestPickupDist < 50) {
         targetAngle = angleTo(myX, myZ, nearestPickup.x, nearestPickup.z);
       } else if (nearestEnemy) {
         targetAngle = angleTo(myX, myZ, nearestEnemy.x, nearestEnemy.z);
-        if (nearestEnemyDist < shootRange + 10) shouldShoot = true;
       } else if (nearestPickup) {
         targetAngle = angleTo(myX, myZ, nearestPickup.x, nearestPickup.z);
       }
@@ -156,7 +185,7 @@ export async function runShooterAgent({ key, name }, baseUrl, options = {}) {
       await fetch(`${baseUrl}/api/shooter/match/action`, {
         method: 'POST',
         headers: HEADERS,
-        body: JSON.stringify({ angle: targetAngle, shoot: shouldShoot, move: true }),
+        body: JSON.stringify({ angle: targetAngle, shoot: shouldShoot, move: shouldMove }),
       });
 
       tickCount++;

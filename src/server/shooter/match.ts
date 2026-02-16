@@ -14,6 +14,7 @@ import {
   SHOOTER_RESULTS_DURATION,
   SHOOTER_BETTING_CLOSE_BEFORE_START,
   TICK_MS,
+  MOVEMENT_SPEED,
 } from './constants.js';
 
 const EFFECTIVE_LOBBY_DURATION = SHOOTER_LOBBY_DURATION; // 5s countdown (dev and prod)
@@ -32,7 +33,7 @@ export type ShooterSpectatorState = {
   phase: string;
   tick: number;
   timeRemaining: number;
-  arena: { width: number; height: number };
+  arena: { width: number; height: number; movementSpeed: number };
   players: Array<{
     id: string;
     name: string;
@@ -47,6 +48,7 @@ export type ShooterSpectatorState = {
     kills: number;
     score: number;
     characterId?: string;
+    moving?: boolean;
   }>;
   pickups: Array<{ id: string; x: number; z: number; weaponType: string }>;
   leaderboard: Array<{ id: string; name: string; score: number; kills: number; lives: number; alive: boolean }>;
@@ -95,6 +97,7 @@ export class ShooterMatchManager {
       kills: p.kills,
       score: p.score,
       characterId: p.characterId,
+      moving: p.moving,
     }));
     const leaderboard = Array.from(match.players.values())
       .map((p) => ({
@@ -115,7 +118,7 @@ export class ShooterMatchManager {
       phase: match.phase,
       tick: match.tick,
       timeRemaining,
-      arena: { width: 90, height: 90 },
+      arena: { width: 90, height: 90, movementSpeed: MOVEMENT_SPEED * 1000 },
       players: playersList,
       pickups: match.pickups.filter((p) => !p.taken).map((p) => ({ id: p.id, x: p.x, z: p.z, weaponType: p.weaponType })),
       leaderboard,
@@ -129,6 +132,14 @@ export class ShooterMatchManager {
   }
 
   async start(): Promise<void> {
+    // Initialize Rapier physics (loads map GLB, creates colliders)
+    try {
+      await this.engine.init();
+      console.log('[ShooterMatchManager] Physics engine initialized');
+    } catch (err) {
+      console.warn('[ShooterMatchManager] Physics init failed, continuing with fallback:', err);
+    }
+
     try {
       const highestId = await getHighestShooterMatchId();
       this.nextMatchId = highestId + 1;
@@ -139,6 +150,11 @@ export class ShooterMatchManager {
     }
     console.log('[ShooterMatchManager] Opening initial shooter lobby...');
     this.openLobby();
+  }
+
+  /** Get building bounding boxes for API exposure */
+  getBuildingBBoxes(): Array<{ minX: number; maxX: number; minZ: number; maxZ: number }> {
+    return this.engine.getBuildingBBoxes();
   }
 
   stop(): void {

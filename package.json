@@ -14,12 +14,15 @@
     "backup:db": "tsx scripts/backup-db.ts",
     "normalize-winner-names": "tsx scripts/normalize-winner-names.ts",
     "house-bots": "node scripts/run-house-bots.js",
+    "shooter-bots": "node scripts/run-shooter-bots.js",
     "upload-nft-images": "tsx scripts/upload-nft-images-to-r2.ts",
     "upload-nft-metadata": "tsx scripts/upload-nft-metadata-to-r2.ts",
     "sample-nft-image": "tsx scripts/generate-sample-nft-image.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.990.0",
+    "@dimforge/rapier3d-compat": "^0.19.3",
+    "@gltf-transform/core": "^4.3.0",
     "@react-three/drei": "^9.103.0",
     "@react-three/fiber": "8.13.3",
     "@react-three/postprocessing": "^2.16.2",

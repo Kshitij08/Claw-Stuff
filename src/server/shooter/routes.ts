@@ -4,11 +4,21 @@
 import { Router, Request, Response } from 'express';
 import { verifyMoltbookAgent, createTestAgent, checkRateLimit } from '../api/auth.js';
 import type { ShooterMatchManager } from './match.js';
+import { MOVEMENT_SPEED } from './constants.js';
 
 const DEV_MODE = process.env.NODE_ENV !== 'production';
 
 export function createShooterRoutes(shooterMatchManager: ShooterMatchManager): Router {
   const router = Router();
+
+  // Cache building bboxes (static per map, computed once)
+  let cachedObstacles: Array<{ minX: number; maxX: number; minZ: number; maxZ: number }> | null = null;
+  const getObstacles = () => {
+    if (!cachedObstacles) {
+      cachedObstacles = shooterMatchManager.getBuildingBBoxes();
+    }
+    return cachedObstacles;
+  };
 
   const extractApiKey = (req: Request): string | null => {
     const authHeader = req.headers.authorization;
@@ -48,6 +58,7 @@ export function createShooterRoutes(shooterMatchManager: ShooterMatchManager): R
       kills: p.kills,
       score: p.score,
       characterId: p.characterId,
+      moving: p.moving,
     }));
     const leaderboard = Array.from(match.players.values())
       .map((p) => ({
@@ -68,10 +79,11 @@ export function createShooterRoutes(shooterMatchManager: ShooterMatchManager): R
       phase: match.phase,
       tick: match.tick,
       timeRemaining,
-      arena: { width: 90, height: 90 },
+      arena: { width: 90, height: 90, movementSpeed: MOVEMENT_SPEED * 1000 },
       players: playersList,
       pickups: match.pickups.filter((p) => !p.taken).map((p) => ({ id: p.id, x: p.x, z: p.z, weaponType: p.weaponType })),
       leaderboard,
+      obstacles: getObstacles(),
     });
   });
 
@@ -203,11 +215,12 @@ export function createShooterRoutes(shooterMatchManager: ShooterMatchManager): R
       phase: match.phase,
       tick: match.tick,
       timeRemaining,
-      arena: { width: 90, height: 90 },
+      arena: { width: 90, height: 90, movementSpeed: MOVEMENT_SPEED * 1000 },
       you,
       players: playersList,
       pickups: match.pickups.filter((p) => !p.taken).map((p) => ({ id: p.id, x: p.x, z: p.z, weaponType: p.weaponType })),
       leaderboard,
+      obstacles: getObstacles(),
     });
   });
 

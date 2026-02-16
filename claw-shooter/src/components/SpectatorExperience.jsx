@@ -17,7 +17,13 @@ export function SpectatorExperience() {
     <>
       <MapWithFallback onReady={(opts) => setMapFloorY(opts?.floorY ?? 0)} />
       {isActive && spectatorMatchState.players.map((p) => (
-        <SpectatorPlayer key={p.id} player={p} mapFloorY={mapFloorY} />
+        <SpectatorPlayer
+          key={p.id}
+          player={p}
+          mapFloorY={mapFloorY}
+          matchTick={spectatorMatchState.tick}
+          movementSpeed={spectatorMatchState.arena?.movementSpeed}
+        />
       ))}
       {isActive && spectatorMatchState.pickups?.map((p) => (
         <WeaponPickup

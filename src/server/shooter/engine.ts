@@ -1,5 +1,6 @@
 /**
  * Server-side shooter game engine. Ticks at fixed interval; applies move, shoot, damage, respawn, pickups.
+ * Uses Rapier3D for physics (building collision, player collision, arena walls).
  */
 
 import {
@@ -11,6 +12,7 @@ import {
   HEALTH_PER_LIFE,
   TICK_MS,
   MOVEMENT_SPEED,
+  PLAYER_COLLISION_RADIUS,
   INITIAL_WEAPON_PICKUPS,
   MIN_SPAWN_SEPARATION,
   MIN_DISTANCE_GUN_FROM_PLAYER,
@@ -19,6 +21,7 @@ import {
   MAX_SHOOTER_PLAYERS,
   type WeaponType,
 } from './constants.js';
+import { ShooterPhysics, type BuildingBBox } from './physics.js';
 
 export interface ShooterPlayer {
   id: string;
@@ -36,6 +39,8 @@ export interface ShooterPlayer {
   lastShotAt: number; // tick index
   /** Character/skin id e.g. G_1 */
   characterId?: string;
+  /** True when player moved this tick (for client Run/Idle animation) */
+  moving?: boolean;
 }
 
 /** Pending action from API (applied next tick) */
@@ -79,7 +84,7 @@ function clamp(value: number, min: number, max: number): number {
 /** Generate spawn points and pickup positions */
 function generateSpawnPoints(count: number): { x: number; z: number }[] {
   const points: { x: number; z: number }[] = [];
-  const margin = 8;
+  const margin = 18;
   for (let i = 0; i < count * 3; i++) {
     const x = MAP_BOUNDS.minX + margin + Math.random() * (MAP_BOUNDS.maxX - MAP_BOUNDS.minX - 2 * margin);
     const z = MAP_BOUNDS.minZ + margin + Math.random() * (MAP_BOUNDS.maxZ - MAP_BOUNDS.minZ - 2 * margin);
@@ -119,12 +124,37 @@ export class ShooterEngine {
   private tickInterval: ReturnType<typeof setInterval> | null = null;
   private onTickCallback: ((state: ShooterMatchState) => void) | null = null;
   private onMatchEndCallback: ((state: ShooterMatchState) => void) | null = null;
+  private physics: ShooterPhysics = new ShooterPhysics();
+
+  /** Initialize Rapier WASM and load map geometry. Call once at server startup. */
+  async init(): Promise<void> {
+    try {
+      await this.physics.init();
+      console.log('[ShooterEngine] Physics initialized successfully');
+    } catch (err) {
+      console.error('[ShooterEngine] Physics initialization failed, falling back to simple movement:', err);
+    }
+  }
+
+  /** Whether Rapier physics is active (false = fallback to simple bounds-only movement) */
+  get physicsReady(): boolean {
+    return this.physics.isReady();
+  }
+
+  /** Building bounding boxes for API exposure */
+  getBuildingBBoxes(): BuildingBBox[] {
+    return this.physics.getBuildingBBoxes();
+  }
 
   createMatch(matchId: string): ShooterMatchState {
     if (this.state && this.state.phase !== 'finished') {
       throw new Error('Match already in progress');
     }
-    const spawnPoints = generateSpawnPoints(MAX_SHOOTER_PLAYERS);
+
+    // Clean up any lingering Rapier player bodies from a previous match
+    this.physics.resetPlayers();
+
+    const spawnPoints = this.generateValidSpawnPoints(MAX_SHOOTER_PLAYERS);
     const state: ShooterMatchState = {
       id: matchId,
       phase: 'lobby',
@@ -138,6 +168,29 @@ export class ShooterEngine {
     };
     this.state = state;
     return state;
+  }
+
+  /** Generate spawn points that don't overlap with buildings */
+  private generateValidSpawnPoints(count: number): { x: number; z: number }[] {
+    const points: { x: number; z: number }[] = [];
+    const margin = 18;
+    const maxAttempts = count * 10;
+    for (let i = 0; i < maxAttempts; i++) {
+      const x = MAP_BOUNDS.minX + margin + Math.random() * (MAP_BOUNDS.maxX - MAP_BOUNDS.minX - 2 * margin);
+      const z = MAP_BOUNDS.minZ + margin + Math.random() * (MAP_BOUNDS.maxZ - MAP_BOUNDS.minZ - 2 * margin);
+      const ok = points.every((p) => distance(p.x, p.z, x, z) >= MIN_SPAWN_SEPARATION);
+      if (!ok) continue;
+      // Reject spawn points inside buildings (if physics is ready)
+      if (this.physics.isReady() && this.physics.isInsideBuilding(x, z)) continue;
+      points.push({ x, z });
+      if (points.length >= count) break;
+    }
+    // Fallback: if we couldn't find enough valid points, fill with unvalidated ones
+    if (points.length < count) {
+      const fallback = generateSpawnPoints(count - points.length);
+      points.push(...fallback);
+    }
+    return points;
   }
 
   getMatch(): ShooterMatchState | null {
@@ -202,6 +255,12 @@ export class ShooterEngine {
       characterId: characterId ?? `G_1`,
     };
     match.players.set(playerId, player);
+
+    // Create Rapier physics body for this player
+    if (this.physics.isReady()) {
+      this.physics.createPlayerBody(playerId, spawn.x, spawn.z);
+    }
+
     return player;
   }
 
@@ -228,7 +287,7 @@ export class ShooterEngine {
 
     match.tick += 1;
 
-    // Apply pending actions (move angle only; shoot processed after move)
+    // Apply pending actions: update angle and determine movement
     for (const [playerId, action] of match.pendingActions) {
       const player = match.players.get(playerId);
       if (!player || !player.alive) continue;
@@ -237,16 +296,99 @@ export class ShooterEngine {
       }
     }
 
-    // Move alive players only when they have a pending action with move: true
-    for (const player of match.players.values()) {
-      if (!player.alive) continue;
-      const action = match.pendingActions.get(player.id);
-      if (!action || action.move !== true) continue;
+    if (this.physics.isReady()) {
+      // ── Rapier physics path: use KinematicCharacterController for proper collision ──
+
       const speed = MOVEMENT_SPEED * TICK_MS; // units per tick
-      player.x += Math.sin(player.angle) * speed;
-      player.z += Math.cos(player.angle) * speed;
-      player.x = clamp(player.x, MAP_BOUNDS.minX, MAP_BOUNDS.maxX);
-      player.z = clamp(player.z, MAP_BOUNDS.minZ, MAP_BOUNDS.maxZ);
+      const debugTick = match.tick % 100 === 0;
+      for (const player of match.players.values()) {
+        if (!player.alive) {
+          player.moving = false;
+          continue;
+        }
+        const action = match.pendingActions.get(player.id);
+        const wantsMove = action?.move === true;
+
+        if (wantsMove) {
+          // Compute desired movement in the player's facing direction
+          const dx = Math.sin(player.angle) * speed;
+          const dz = Math.cos(player.angle) * speed;
+
+          if (debugTick) {
+            console.log(`[tick ${match.tick}] ${player.name} wants move: angle=${player.angle.toFixed(2)} dx=${dx.toFixed(3)} dz=${dz.toFixed(3)} pos=(${player.x.toFixed(2)}, ${player.z.toFixed(2)})`);
+          }
+
+          // movePlayer uses KinematicCharacterController to slide along walls
+          const newPos = this.physics.movePlayer(player.id, dx, dz);
+          if (newPos) {
+            const prevX = player.x;
+            const prevZ = player.z;
+            player.x = newPos.x;
+            player.z = newPos.z;
+            player.moving = Math.abs(player.x - prevX) > 0.001 || Math.abs(player.z - prevZ) > 0.001;
+
+            if (debugTick) {
+              console.log(`  -> newPos=(${newPos.x.toFixed(2)}, ${newPos.z.toFixed(2)}) moving=${player.moving}`);
+            }
+          } else {
+            player.moving = false;
+            if (debugTick) console.log(`  -> movePlayer returned null`);
+          }
+        } else {
+          player.moving = false;
+          if (debugTick) console.log(`[tick ${match.tick}] ${player.name} move=false`);
+        }
+      }
+
+      // Step the world to finalize kinematic body positions
+      this.physics.stepWorld();
+
+    } else {
+      // ── Fallback: simple movement without physics (no building collision) ──
+
+      const speed = MOVEMENT_SPEED * TICK_MS; // units per tick
+      for (const player of match.players.values()) {
+        if (!player.alive) continue;
+        const action = match.pendingActions.get(player.id);
+        const wantsMove = action?.move === true;
+        if (wantsMove) {
+          const prevX = player.x;
+          const prevZ = player.z;
+          player.x += Math.sin(player.angle) * speed;
+          player.z += Math.cos(player.angle) * speed;
+          player.x = clamp(player.x, MAP_BOUNDS.minX, MAP_BOUNDS.maxX);
+          player.z = clamp(player.z, MAP_BOUNDS.minZ, MAP_BOUNDS.maxZ);
+          player.moving = player.x !== prevX || player.z !== prevZ;
+        } else {
+          player.moving = false;
+        }
+      }
+
+      // Player-player collision: push overlapping players apart (fallback only)
+      const alivePlayers = Array.from(match.players.values()).filter((p) => p.alive);
+      const minDist = PLAYER_COLLISION_RADIUS * 2;
+      for (let i = 0; i < alivePlayers.length; i++) {
+        for (let j = i + 1; j < alivePlayers.length; j++) {
+          const a = alivePlayers[i];
+          const b = alivePlayers[j];
+          const dx = b.x - a.x;
+          const dz = b.z - a.z;
+          const dist = Math.sqrt(dx * dx + dz * dz);
+          if (dist < minDist && dist > 0.001) {
+            const overlap = (minDist - dist) / 2;
+            const nx = dx / dist;
+            const nz = dz / dist;
+            a.x -= nx * overlap;
+            a.z -= nz * overlap;
+            b.x += nx * overlap;
+            b.z += nz * overlap;
+            a.x = clamp(a.x, MAP_BOUNDS.minX, MAP_BOUNDS.maxX);
+            a.z = clamp(a.z, MAP_BOUNDS.minZ, MAP_BOUNDS.maxZ);
+            b.x = clamp(b.x, MAP_BOUNDS.minX, MAP_BOUNDS.maxX);
+            b.z = clamp(b.z, MAP_BOUNDS.minZ, MAP_BOUNDS.maxZ);
+          }
+        }
+      }
     }
 
     // Process shoots (from same tick's pending actions)
@@ -263,8 +405,9 @@ export class ShooterEngine {
       player.lastShotAt = match.tick;
       if (stats.ammo !== null) player.ammo -= 1;
 
-      // Hit check: find closest enemy in range (cone or line)
+      // Hit check: find closest enemy in range (wider cone for melee)
       const range = stats.range;
+      const hitCone = stats.isMelee ? 0.8 : 0.4; // radians – melee ~46°, ranged ~23°
       let bestTarget: ShooterPlayer | null = null;
       let bestDist = range + 1;
       for (const other of match.players.values()) {
@@ -274,7 +417,7 @@ export class ShooterEngine {
         const angleTo = Math.atan2(other.x - player.x, other.z - player.z);
         let diff = Math.abs(angleTo - player.angle);
         if (diff > Math.PI) diff = 2 * Math.PI - diff;
-        if (diff < 0.3) {
+        if (diff < hitCone) {
           bestDist = d;
           bestTarget = other;
         }
@@ -293,7 +436,11 @@ export class ShooterEngine {
       }
     }
 
-    match.pendingActions.clear();
+    // Consume shoot flag after processing (prevents infinite shooting from stale actions)
+    // but keep move + angle so movement persists between agent action sends
+    for (const [, action] of match.pendingActions) {
+      action.shoot = false;
+    }
 
     // Pickups
     for (const pickup of match.pickups) {
@@ -325,7 +472,9 @@ export class ShooterEngine {
     let spawn = match.spawnPoints[Math.floor(Math.random() * match.spawnPoints.length)];
     for (let i = 0; i < 20; i++) {
       const ok = used.every((u) => distance(u.x, u.z, spawn.x, spawn.z) >= MIN_SPAWN_SEPARATION);
-      if (ok) break;
+      // Also avoid buildings on respawn
+      const inBuilding = this.physics.isReady() && this.physics.isInsideBuilding(spawn.x, spawn.z);
+      if (ok && !inBuilding) break;
       spawn = match.spawnPoints[Math.floor(Math.random() * match.spawnPoints.length)];
     }
     player.x = spawn.x;
@@ -334,6 +483,11 @@ export class ShooterEngine {
     player.weapon = WEAPON_TYPES.KNIFE;
     player.ammo = -1;
     player.alive = true;
+
+    // Teleport Rapier body to new spawn
+    if (this.physics.isReady()) {
+      this.physics.teleportPlayer(player.id, spawn.x, spawn.z);
+    }
   }
 
   private finishMatch(): void {
@@ -343,6 +497,7 @@ export class ShooterEngine {
     }
     if (!this.state) return;
     this.state.phase = 'finished';
+    this.physics.resetPlayers();
     if (this.onMatchEndCallback) this.onMatchEndCallback(this.state);
   }
 
@@ -352,5 +507,6 @@ export class ShooterEngine {
       this.tickInterval = null;
     }
     if (this.state) this.state.phase = 'finished';
+    this.physics.resetPlayers();
   }
 }

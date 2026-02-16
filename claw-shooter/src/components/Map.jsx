@@ -3,7 +3,7 @@ import { Component, useEffect, useMemo } from "react";
 import { RigidBody } from "@react-three/rapier";
 import { Box3, Vector3 } from "three";
 
-/** Error boundary: if Map fails to load (e.g. map1.glb 404), render Map with fallback path. */
+/** Error boundary: if Map fails to load (e.g. map4.glb 404), render Map with fallback path. */
 class MapErrorBoundary extends Component {
   state = { failed: false };
   static getDerivedStateFromError() {
@@ -18,13 +18,13 @@ class MapErrorBoundary extends Component {
 }
 
 const BASE = import.meta.env.BASE_URL;
-const MAP_PRIMARY = `${BASE}map1.glb`;
+const MAP_PRIMARY = `${BASE}map4.glb`;
 const MAP_FALLBACK = `${BASE}map.glb`;
 
 /** Play area width (X/Z) so we scale the arena to match. Must match weapons.js MAP_BOUNDS. */
 const PLAY_AREA_SIZE = 90; // MAP_BOUNDS.maxX - MAP_BOUNDS.minX
 
-/** @param {{ path?: string }} props - path: optional override (e.g. fallback when map1.glb 404s) */
+/** @param {{ path?: string }} props - path: optional override (e.g. fallback when map4.glb 404s) */
 export const Map = ({ path: pathOverride }) => {
   const path = pathOverride ?? MAP_PRIMARY;
   const mapScene = useGLTF(path);
@@ -68,7 +68,7 @@ export const Map = ({ path: pathOverride }) => {
 useGLTF.preload(MAP_PRIMARY);
 useGLTF.preload(MAP_FALLBACK);
 
-/** Map that tries map1.glb first and falls back to map.glb if the primary fails to load. */
+/** Map that tries map4.glb first and falls back to map.glb if the primary fails to load. */
 export const MapWithFallback = () => (
   <MapErrorBoundary>
     <Map />

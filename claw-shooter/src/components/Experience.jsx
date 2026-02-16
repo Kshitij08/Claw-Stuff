@@ -48,6 +48,7 @@ export const Experience = ({ downgradedPerformance = false }) => {
   const [playerSpawnMarkers, setPlayerSpawnMarkers] = useState([]);
   const refreshCountRef = useRef(0);
   const botNameIndexRef = useRef(0);
+  const botCharacterIndexRef = useRef(0);
   const hasStartedRef = useRef(false);
   const botsAddedRef = useRef(0);
   const pickupsSpawnedRef = useRef(false);
@@ -163,7 +164,7 @@ export const Experience = ({ downgradedPerformance = false }) => {
     addWeaponPickup(weaponType);
   };
 
-  /* map1.glb: use spawn positions as-is (world space), no offset or remap. */
+  /* map4.glb: use spawn positions as-is (world space), no offset or remap. */
   const _worldPos = useRef(new Vector3());
   const refreshSpawnPositions = () => {
     const collectByName1BasedWorld = (prefix, max = 1000) => {
@@ -305,7 +306,7 @@ export const Experience = ({ downgradedPerformance = false }) => {
           state.setState(
             "character",
             state.isBot()
-              ? BOT_CHARACTERS[Math.floor(Math.random() * BOT_CHARACTERS.length)]
+              ? BOT_CHARACTERS[botCharacterIndexRef.current++ % BOT_CHARACTERS.length]
               : DEFAULT_CHARACTER
           );
         }

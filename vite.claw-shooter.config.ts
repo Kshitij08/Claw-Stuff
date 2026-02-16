@@ -17,6 +17,11 @@ export default defineConfig({
   root: "claw-shooter",
   base: "/claw-shooter/",
   plugins: [react()],
+  server: {
+    proxy: {
+      "/api": { target: "http://localhost:3000", changeOrigin: true },
+    },
+  },
   css: {
     postcss: {
       plugins: [

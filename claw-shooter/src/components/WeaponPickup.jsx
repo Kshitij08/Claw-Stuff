@@ -10,11 +10,12 @@ import { useEffect, useMemo, useRef } from "react";
 
 const BASE = import.meta.env.BASE_URL;
 
+/** Filenames match public/claw-shooter: Pistol.glb, Smg.glb, Shotgun.glb, Rifle.glb (capital first letter) */
 const WEAPON_MODEL = {
-  pistol: `${BASE}pistol.glb`,
-  smg: `${BASE}smg.glb`,
-  shotgun: `${BASE}shotgun.glb`,
-  assault_rifle: `${BASE}rifle.glb`,
+  pistol: `${BASE}Pistol.glb`,
+  smg: `${BASE}Smg.glb`,
+  shotgun: `${BASE}Shotgun.glb`,
+  assault_rifle: `${BASE}Rifle.glb`,
 };
 
 const LABELS = {

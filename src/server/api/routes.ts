@@ -316,10 +316,11 @@ export function createRoutes(matchManager: MatchManager): Router {
     res.json(leaderboard);
   });
 
-  // GET /api/global-leaderboard - No auth required
+  // GET /api/global-leaderboard - No auth required. ?game=shooter filters to shooter only.
   router.get('/global-leaderboard', async (req: Request, res: Response) => {
     try {
-      const data = await getGlobalLeaderboard();
+      const game = req.query.game === 'shooter' ? 'shooter' : req.query.game === 'snake' ? 'snake' : undefined;
+      const data = await getGlobalLeaderboard(game ? { game } : undefined);
       res.json(data);
     } catch (err) {
       console.error('[api] /api/global-leaderboard failed:', err);

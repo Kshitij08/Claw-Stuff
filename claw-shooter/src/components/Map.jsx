@@ -73,6 +73,10 @@ export const MapVisualInner = ({ path: pathOverride }) => {
     return { scale, position: [position.x, position.y, position.z] };
   }, [mapScene.scene, path]);
 
+  useEffect(() => {
+    onReady?.( { floorY } );
+  }, [floorY, onReady]);
+
   return (
     <group position={mapPosition} scale={mapScale}>
       <primitive object={mapScene.scene} />

@@ -4,7 +4,6 @@
  */
 
 import { Canvas } from "@react-three/fiber";
-import { Experience } from "./components/Experience";
 import { Bloom, EffectComposer } from "@react-three/postprocessing";
 import { Loader, SoftShadows } from "@react-three/drei";
 import { Suspense } from "react";
@@ -15,7 +14,16 @@ import { GameManagerProvider } from "./components/GameManager";
 import { SpectatorCamera } from "./components/SpectatorCamera";
 import { GameSounds } from "./components/GameSounds";
 
+/**
+ * Claw Shooter: server-only. Game runs on the server; agents use REST API (or Python scripts).
+ * This UI is spectator-only. We call insertCoin once so Playroom hooks (SpectatorCamera, RightPanel) don't break;
+ * no bots are added – the 3D scene is driven only by server state.
+ */
 function App() {
+  useEffect(() => {
+    insertCoin({ skipLobby: true, enableBots: false, maxPlayersPerRoom: 2 });
+  }, []);
+
   return (
     <>
       <Loader />

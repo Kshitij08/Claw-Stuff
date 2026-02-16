@@ -44,6 +44,22 @@ export function RightPanel() {
       alive: p.alive,
     }));
 
+  const leaderboardEntries = isSpectatorMode
+    ? spectatorMatchState.leaderboard.map((e, i) => ({
+        id: e.id,
+        player: { id: e.id },
+        name: e.name,
+        survivalSeconds: 0,
+        kills: e.kills,
+        deaths: 0,
+        lives: e.lives,
+        weapon: "knife",
+        ammo: null,
+        eliminated: !e.alive,
+        color: "#888",
+      }))
+    : playroomLeaderboardEntries;
+
   useEffect(() => {
     if (gamePhase !== "playing") return;
     const id = setInterval(() => setElapsedTick((t) => t + 1), 1000);
@@ -51,10 +67,10 @@ export function RightPanel() {
   }, [gamePhase]);
 
   const phaseClass =
-    gamePhase === "lobby"
-      ? "match-phase phase-lobby"
-      : gamePhase === "playing"
-        ? "match-phase phase-active"
+    isSpectatorMode || gamePhase === "playing"
+      ? "match-phase phase-active"
+      : gamePhase === "lobby"
+        ? "match-phase phase-lobby"
         : "match-phase phase-finished";
   const phaseLabel =
     gamePhase === "lobby" ? "Waiting" :
@@ -74,7 +90,7 @@ export function RightPanel() {
             {gamePhase === "playing" ? formatSeconds(timeRemaining) : "--:--"}
           </div>
           <div className="text-right">
-            <div className="text-xs font-bold text-slate-400 uppercase">Players</div>
+            <div className="text-xs font-bold text-slate-400 uppercase">{isSpectatorMode ? "Time left" : "Players"}</div>
             <div className="text-2xl font-black text-[#d946ef]">
               {aliveCount} / {players.length}
             </div>
@@ -117,14 +133,14 @@ export function RightPanel() {
                         {entry.name}
                       </span>
                       <span className="text-[#a3e635] font-mono tabular-nums text-xs whitespace-nowrap flex-shrink-0">
-                        {formatSeconds(entry.survivalSeconds)}
+                        {isSpectatorMode ? `Score ${entry.score ?? 0}` : formatSeconds(entry.survivalSeconds)}
                       </span>
                     </div>
                     <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-[10px] text-slate-400">
                       <span>K: {entry.kills}</span>
                       <span>D: {entry.deaths}</span>
                       <span>Lives: {entry.lives}</span>
-                      <span className="truncate">{weaponLabel}{weaponAmmo}</span>
+                      {!isSpectatorMode && <span className="truncate">{weaponLabel}{weaponAmmo}</span>}
                     </div>
                   </button>
                 );

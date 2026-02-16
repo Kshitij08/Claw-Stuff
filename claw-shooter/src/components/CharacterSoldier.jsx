@@ -9,6 +9,9 @@ import { useGraph } from "@react-three/fiber";
 import { Color, LoopOnce, MeshStandardMaterial } from "three";
 import { SkeletonUtils } from "three-stdlib";
 
+const BASE = import.meta.env.BASE_URL || "/claw-shooter/";
+const CHARACTER_SOLDIER_PATH = `${BASE}models/Character_Soldier.gltf`;
+
 const WEAPONS = [
   "GrenadeLauncher",
   "AK",
@@ -34,9 +37,7 @@ export function CharacterSoldier({
 }) {
   const group = useRef();
 
-  const { scene, materials, animations } = useGLTF(
-    "/models/Character_Soldier.gltf"
-  );
+  const { scene, materials, animations } = useGLTF(CHARACTER_SOLDIER_PATH);
   // Skinned meshes cannot be re-used in threejs without cloning them
   const clone = useMemo(() => SkeletonUtils.clone(scene), [scene]);
   // useGraph creates two flat object collections for nodes and materials
@@ -135,4 +136,4 @@ export function CharacterSoldier({
   );
 }
 
-useGLTF.preload("/models/Character_Soldier.gltf");
+useGLTF.preload(CHARACTER_SOLDIER_PATH);

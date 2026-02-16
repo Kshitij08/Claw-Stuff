@@ -7,6 +7,25 @@
 import { createPortal } from "react-dom";
 import { useState, useEffect } from "react";
 import { useGameManager } from "./GameManager";
+import { io } from "socket.io-client";
+
+const SHOOTER_STATUS_URL = "/api/shooter/status";
+const SHOOTER_SPECTATOR_URL = "/api/shooter/match/spectator";
+const POLL_INTERVAL_MS = 1500;
+
+/** API base for shooter status/spectator. On localhost, if the app is not on port 3000 we use :3000 so the backend is reached without setting env. */
+function getApiBase() {
+  if (typeof window === "undefined") return "";
+  const env = import.meta.env?.VITE_API_URL;
+  if (env && typeof env === "string" && env.trim()) return env.trim().replace(/\/$/, "");
+  const origin = window.location.origin;
+  const hostname = window.location.hostname || "";
+  const port = window.location.port || (window.location.protocol === "https:" ? "443" : "80");
+  if (hostname === "localhost" && port !== "3000") {
+    return `${window.location.protocol}//localhost:3000`;
+  }
+  return origin;
+}
 
 const BASE = import.meta.env.BASE_URL || "/";
 

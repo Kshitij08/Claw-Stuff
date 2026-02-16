@@ -1,4 +1,4 @@
-const BASE = import.meta.env.BASE_URL || "/";
+const BASE = import.meta.env.BASE_URL || "/claw-shooter/";
 const SKIN_IDS = Array.from({ length: 10 }, (_, i) => `G_${i + 1}`);
 
 export function SkinsTab() {

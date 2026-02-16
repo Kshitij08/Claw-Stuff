@@ -335,10 +335,12 @@ export class ShooterMatchManager {
 
     const result: ShooterSpectatorMatchEnd = {
       matchId: match.id,
-      winner: winner ? { name: winner.name, kills: winner.kills, survivalTime: winner.survivalTime } : null,
+      winner: winner ? { id: winner.id, name: winner.name, character: winner.character, kills: winner.kills, survivalTime: winner.survivalTime } : null,
       finalRanking: leaderboard.map((entry, i) => ({
         rank: i + 1,
+        id: entry.id,
         name: entry.name,
+        character: entry.character,
         kills: entry.kills,
         deaths: entry.deaths,
         survivalTime: entry.survivalTime,

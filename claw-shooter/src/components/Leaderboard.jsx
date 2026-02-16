@@ -8,6 +8,8 @@ import { createPortal } from "react-dom";
 import { useState, useEffect } from "react";
 import { useGameManager } from "./GameManager";
 
+const BASE = import.meta.env.BASE_URL || "/";
+
 function CountdownOverlay({ playerCount, startsAt }) {
   const [secondsLeft, setSecondsLeft] = useState(null);
 
@@ -81,8 +83,20 @@ export const Leaderboard = () => {
           <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/80 p-4 overflow-y-auto">
             <div className="bg-slate-800 p-2 border-4 border-white shadow-[10px_10px_0_#facc15] max-w-sm w-full animate-float my-auto max-h-[90%] overflow-y-auto">
               <div className="bg-[#22d3ee] p-4 md:p-6 text-center border-2 border-white">
-                <div className="w-16 h-16 mx-auto mb-3 bg-white rounded-full flex items-center justify-center border-4 border-black animate-bounce">
-                  <svg className="w-8 h-8 text-[#facc15]" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l2.4 7.4h7.6l-6 4.6 2.3 7-6.3-4.6L5.7 21l2.3-7-6-4.6h7.6L12 2z" /></svg>
+                <div className="w-20 h-20 mx-auto mb-3 bg-white rounded-full flex items-center justify-center border-4 border-black animate-bounce overflow-hidden">
+                  {(finalRanking[0]?.character || finalRanking[0]?.id) ? (
+                    <img
+                      src={`${BASE}skins/${finalRanking[0].character || finalRanking[0].id || "G_1"}.png`}
+                      alt={finalRanking[0]?.name ?? "Winner"}
+                      className="w-full h-full object-contain"
+                      onError={(e) => {
+                        e.target.style.display = "none";
+                        const fallback = e.target.parentElement.querySelector(".winner-trophy");
+                        if (fallback) fallback.classList.remove("hidden");
+                      }}
+                    />
+                  ) : null}
+                  <svg className={`winner-trophy w-8 h-8 text-[#facc15] ${(finalRanking[0]?.character || finalRanking[0]?.id) ? "hidden" : ""}`} fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l2.4 7.4h7.6l-6 4.6 2.3 7-6.3-4.6L5.7 21l2.3-7-6-4.6h7.6L12 2z" /></svg>
                 </div>
                 <h2 className="text-3xl md:text-4xl neo-font text-white mb-1" style={{ WebkitTextStroke: "2px black", textShadow: "3px 3px 0 black" }}>WINNER!</h2>
                 <p className="text-[10px] font-black uppercase text-black/80 mb-3">Battle Royale — ranked by survival</p>

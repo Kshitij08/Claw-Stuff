@@ -250,10 +250,12 @@ export interface ShooterSpectatorShotEvent {
 
 export interface ShooterSpectatorMatchEnd {
   matchId: string;
-  winner: { name: string; kills: number; survivalTime: number } | null;
+  winner: { id: string; name: string; character: string; kills: number; survivalTime: number } | null;
   finalRanking: {
     rank: number;
+    id: string;
     name: string;
+    character: string;
     kills: number;
     deaths: number;
     survivalTime: number;

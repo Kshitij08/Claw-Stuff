@@ -154,12 +154,13 @@ export interface PersonalityMods {
   accuracy: number;
 }
 
+/** Super aggressive: high detect, close preferred, fast, never flee. */
 export const PERSONALITY_MODS: Record<PersonalityType, PersonalityMods> = {
-  Aggressive: { detectRadius: 75, preferredDist: 5, speedMult: 1.25, fleeHealth: 0, accuracy: 0.82 },
-  Cautious:   { detectRadius: 75, preferredDist: 6, speedMult: 1.20, fleeHealth: 0, accuracy: 0.75 },
-  Sniper:     { detectRadius: 80, preferredDist: 10, speedMult: 1.15, fleeHealth: 0, accuracy: 0.92 },
-  Rusher:     { detectRadius: 70, preferredDist: 3, speedMult: 1.40, fleeHealth: 0, accuracy: 0.68 },
-  Tactician:  { detectRadius: 75, preferredDist: 6, speedMult: 1.20, fleeHealth: 0, accuracy: 0.80 },
+  Aggressive: { detectRadius: 95, preferredDist: 3, speedMult: 1.35, fleeHealth: 0, accuracy: 0.86 },
+  Cautious:   { detectRadius: 90, preferredDist: 4, speedMult: 1.28, fleeHealth: 0, accuracy: 0.80 },
+  Sniper:     { detectRadius: 95, preferredDist: 8, speedMult: 1.22, fleeHealth: 0, accuracy: 0.92 },
+  Rusher:     { detectRadius: 88, preferredDist: 2, speedMult: 1.50, fleeHealth: 0, accuracy: 0.72 },
+  Tactician:  { detectRadius: 90, preferredDist: 4, speedMult: 1.30, fleeHealth: 0, accuracy: 0.84 },
 };
 
 /** Weapon tier for matchup evaluation (higher = stronger at range; knife=0). */
@@ -176,7 +177,8 @@ export const WEAPON_TIER: Record<WeaponType, number> = {
 export const SPAWN_FLOOR_Y_OFFSET = 1.2;
 
 // ── Bot AI tuning constants ─────────────────────────────────────────
-export const BOT_MELEE_RANGE = 3.0;
+/** Melee trigger range (server uses knife range + 1.5 so hits up to ~3.5m). */
+export const BOT_MELEE_RANGE = 3.5;
 export const BOT_KNIFE_RUSH_RADIUS = 15;
 /** When a gun bot has enemy closer than this, kite backward (retreat) to maintain range. */
 export const BOT_KITE_DIST = 10;
@@ -190,9 +192,17 @@ export const BOT_STALEMATE_CHECK_INTERVAL_MS = 500;
 export const BOT_STALEMATE_DIST_DELTA = 0.25;
 export const BOT_STALEMATE_TIME_THRESHOLD_MS = 3000;
 export const BOT_NO_LOS_STANDOFF_MS = 2000;
+/** When in no-LOS standoff (e.g. wall between bots), move this long in break direction to escape chase. */
+export const BOT_NO_LOS_STANDOFF_BREAK_DURATION_MS = 2800;
 export const BOT_NO_LOS_EXCLUDE_DURATION_MS = 2000;
 export const BOT_NO_LOS_PATH_PERSIST_MS = 500;
 export const BOT_STRAFE_CHANGE_INTERVAL_MS = 800;
 export const BOT_WANDER_CHANGE_MIN_MS = 800;
 export const BOT_WANDER_CHANGE_MAX_MS = 1500;
 export const BOT_LOW_AMMO_THRESHOLD = 3;
+/** Minimum time to keep the same target before allowing a switch (reduces flip-flopping). */
+export const BOT_TARGET_LOCK_MIN_MS = 4000;
+/** If bot hasn't moved for this long and no enemies nearby, force wander to find a new target. */
+export const BOT_STUCK_WANDER_MS = 3000;
+/** Effective "no limit" radius for target/weapon selection — if it's on the map, bot targets it. */
+export const BOT_TARGET_NO_LIMIT = 500;

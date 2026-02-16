@@ -38,7 +38,7 @@ export const Bullet = ({
     if (gamePhase === "playing") {
       try {
         const audio = new Audio("/sounds/pistol.mp3");
-        audio.volume = 0.2;
+        audio.volume = 0.08;
         audio.play();
       } catch (_) {}
     }

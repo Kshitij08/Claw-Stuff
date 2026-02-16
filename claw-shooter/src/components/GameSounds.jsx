@@ -1,6 +1,6 @@
 /**
  * GameSounds – BGM + one-shot SFX.
- * Files: bg music.mp3, death1.mp3, knife stab.mp3, pistol.mp3 (used for all guns, combo by type).
+ * Files: bg music.mp3, death.mp3, knife stab.mp3, pistol.mp3 (used for all guns, combo by type).
  */
 
 import { useEffect, useRef } from "react";
@@ -10,13 +10,13 @@ const SOUNDS_BASE = "/claw-shooter/sounds";
 
 const sound = (name) => `${SOUNDS_BASE}/${encodeURIComponent(name)}`;
 const BGM_URL = sound("bg music.mp3");
-const DEATH_URL = sound("death1.mp3");
+const DEATH_URL = sound("death.mp3");
 const KNIFE_STAB_URL = sound("knife stab.mp3");
 const PISTOL_SHOT_URL = sound("pistol.mp3");
 
-/** SFX at 200% (BGM stays low). */
+/** SFX at 200% (BGM stays low). Gunshots reduced by 60% (0.4x). */
 const SFX_VOLUME = 2;
-const gunshotVol = Math.min(1, 0.5 * SFX_VOLUME);
+const gunshotVol = Math.min(1, 0.5 * SFX_VOLUME * 0.4);
 const deathVol = Math.min(1, 0.7 * SFX_VOLUME);
 const knifeVol = Math.min(1, 0.6 * SFX_VOLUME);
 
@@ -103,7 +103,7 @@ export function GameSounds() {
     }
   }, [shots?.length, shots]);
 
-  // New hits → death1.mp3 (if killed), knife stab.mp3 (if knife)
+  // New hits → death.mp3 (if killed), knife stab.mp3 (if knife)
   useEffect(() => {
     if (!Array.isArray(hits)) return;
     if (hits.length === 0) {

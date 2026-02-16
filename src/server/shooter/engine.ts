@@ -112,6 +112,11 @@ export class ShooterEngine {
   /** Per-player desired movement direction. Persists until 'stop' action. */
   private moveIntents: Map<string, { angle: number }> = new Map();
 
+  /** Stuck-in-geometry detection: if position unchanged for this long and inside map, teleport out. */
+  private static readonly STUCK_IN_GEOMETRY_MS = 3000;
+  private static readonly STUCK_POS_THRESHOLD = 0.3;
+  private lastStuckCheckPos: Map<string, { x: number; z: number; time: number }> = new Map();
+
   private onTickCallback: ((state: ShooterSpectatorState) => void) | null = null;
   private onShotCallback: ((shot: ShooterSpectatorShotEvent) => void) | null = null;
   private onHitCallback: ((hit: ShooterSpectatorHitEvent) => void) | null = null;
@@ -175,6 +180,7 @@ export class ShooterEngine {
     // Clean up old player bodies and bullets (new world so no need to remove bodies)
     this.playerBodies.clear();
     this.moveIntents.clear();
+    this.lastStuckCheckPos.clear();
     this.actionQueue = [];
     this.activeBullets = [];
     this.bulletIdCounter = 0;
@@ -627,16 +633,17 @@ export class ShooterEngine {
   private syncPositions(): void {
     if (!this.match) return;
 
+    const now = Date.now();
+
     for (const [playerId, body] of this.playerBodies) {
       const player = this.match.players.get(playerId);
       if (!player) continue;
 
-      // Skip dead players: their body is parked at (1000,-100,1000) — keep last alive position
       if (!player.alive) continue;
 
       const pos = body.rigidBody.translation();
       player.x = pos.x;
-      player.y = this.arenaFloorY; // Constant floor Y throughout the game
+      player.y = this.arenaFloorY;
       player.z = pos.z;
 
       const skinBound = PLAYER_CAPSULE_RADIUS + 0.15;
@@ -651,13 +658,38 @@ export class ShooterEngine {
       if (outOfBounds) {
         const spawn = this.getValidSpawnPoint();
         const bodyY = this.arenaFloorY + PLAYER_CAPSULE_HALF_HEIGHT + PLAYER_CAPSULE_RADIUS;
+        const pos = { x: spawn.x, y: bodyY, z: spawn.z };
         player.x = spawn.x;
         player.y = this.arenaFloorY;
         player.z = spawn.z;
-        body.rigidBody.setNextKinematicTranslation({ x: spawn.x, y: bodyY, z: spawn.z });
+        body.rigidBody.setNextKinematicTranslation(pos);
+        body.rigidBody.setTranslation(pos, true);
+        this.lastStuckCheckPos.set(playerId, { x: spawn.x, z: spawn.z, time: now });
       } else {
         player.x = Math.max(ARENA_MIN_X, Math.min(ARENA_MAX_X, player.x));
         player.z = Math.max(ARENA_MIN_Z, Math.min(ARENA_MAX_Z, player.z));
+
+        const prev = this.lastStuckCheckPos.get(playerId);
+        const dx = player.x - (prev?.x ?? player.x - 1);
+        const dz = player.z - (prev?.z ?? player.z - 1);
+        const dist = Math.sqrt(dx * dx + dz * dz);
+
+        if (!prev || dist > ShooterEngine.STUCK_POS_THRESHOLD) {
+          this.lastStuckCheckPos.set(playerId, { x: player.x, z: player.z, time: now });
+        } else if (now - prev.time >= ShooterEngine.STUCK_IN_GEOMETRY_MS) {
+          const centerY = this.arenaFloorY + PLAYER_CAPSULE_HALF_HEIGHT + PLAYER_CAPSULE_RADIUS;
+          if (!this.isPointInEmptySpace(player.x, centerY, player.z, PLAYER_CAPSULE_RADIUS)) {
+            const spawn = this.getValidSpawnPoint();
+            const bodyY = this.arenaFloorY + PLAYER_CAPSULE_HALF_HEIGHT + PLAYER_CAPSULE_RADIUS;
+            const pos = { x: spawn.x, y: bodyY, z: spawn.z };
+            player.x = spawn.x;
+            player.y = this.arenaFloorY;
+            player.z = spawn.z;
+            body.rigidBody.setNextKinematicTranslation(pos);
+            body.rigidBody.setTranslation(pos, true);
+            this.lastStuckCheckPos.set(playerId, { x: spawn.x, z: spawn.z, time: now });
+          }
+        }
       }
     }
   }
@@ -1106,8 +1138,8 @@ export class ShooterEngine {
 
     player.lastShotTime = now;
 
-    // Use a generous melee range (knife range + 1.0) to account for movement between ticks
-    const meleeReach = stats.range + 1.0;
+    // Use a generous melee range (knife range + 1.5) so knife bots connect when circling
+    const meleeReach = stats.range + 1.5;
 
     // Find closest enemy within melee range -- no facing check (melee is 360 degrees)
     // This prevents issues where the bot is right next to an enemy but facing slightly wrong
@@ -1520,12 +1552,13 @@ export class ShooterEngine {
   }
 
   /** Build the leaderboard sorted by survival time (desc), then KDA (desc), then kills (desc). */
-  getLeaderboard(): { id: string; name: string; kills: number; deaths: number; survivalTime: number }[] {
+  getLeaderboard(): { id: string; name: string; character: string; kills: number; deaths: number; survivalTime: number }[] {
     if (!this.match) return [];
     return [...this.match.players.values()]
       .map((p) => ({
         id: p.id,
         name: p.name,
+        character: p.character ?? 'G_1',
         kills: p.kills,
         deaths: p.deaths,
         survivalTime: Math.round(getTotalSurvivalSeconds(p) * 10) / 10,

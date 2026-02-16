@@ -384,7 +384,7 @@ export const Experience = ({ downgradedPerformance = false }) => {
     }
   }
 
-  const isSpectatorMode = spectatorMatchState?.phase === "active" && Array.isArray(spectatorMatchState?.players);
+  const isSpectatorMode = gameState?.phase === "active" && Array.isArray(players);
 
   return (
     <>

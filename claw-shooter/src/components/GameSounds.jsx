@@ -110,7 +110,10 @@ export function GameSounds() {
       prevHitsLen.current = 0;
       return;
     }
-    if (hits.length <= prevHitsLen.current) return;
+    if (hits.length <= prevHitsLen.current) {
+      prevHitsLen.current = hits.length;
+      return;
+    }
     const from = prevHitsLen.current;
     prevHitsLen.current = hits.length;
     for (let i = from; i < hits.length; i++) {

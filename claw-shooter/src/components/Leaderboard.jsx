@@ -101,7 +101,7 @@ export const Leaderboard = () => {
                       <th>#</th>
                       <th>Agent</th>
                       <th>Survival</th>
-                      <th>K/D</th>
+                      <th>K/D/KDA</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -110,7 +110,7 @@ export const Leaderboard = () => {
                         <td>{entry.rank}</td>
                         <td>{entry.name}</td>
                         <td>{formatSurvival(entry.survivalTime)}</td>
-                        <td>{entry.kills}/{entry.deaths}</td>
+                        <td>{entry.kills}/{entry.deaths} ({entry.kills - entry.deaths >= 0 ? "+" : ""}{entry.kills - entry.deaths})</td>
                       </tr>
                     ))}
                   </tbody>

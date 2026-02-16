@@ -236,13 +236,9 @@ shooterNs.on('connection', (socket) => {
   });
 });
 
-// Throttle shooter broadcasts to ~10 Hz (every other tick)
-let shooterTickCounter = 0;
+// Broadcast every tick (20 Hz) so spectator movement is smooth, not teleporting
 shooterMatchManager.onStateUpdate((state) => {
-  shooterTickCounter++;
-  if (shooterTickCounter % 2 === 0) {
-    shooterNs.volatile.emit('shooterState', state);
-  }
+  shooterNs.volatile.emit('shooterState', state);
 });
 
 shooterMatchManager.onShot((shot) => {

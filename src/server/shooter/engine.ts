@@ -58,6 +58,8 @@ import {
   randomArenaPointInEmptySpace,
   getTotalSurvivalSeconds,
   resetCharacterIndex,
+  setDefaultFloorY,
+  setPlayableBounds,
 } from './player.js';
 import { canFire, consumeAmmo, randomGunType } from './weapons.js';
 
@@ -83,7 +85,12 @@ interface ActiveBullet {
   weaponType: WeaponType;
   spawnTime: number;
   fromX: number;
+  fromY: number;
   fromZ: number;
+  /** Previous frame position for swept raycast collision detection. */
+  prevX: number;
+  prevY: number;
+  prevZ: number;
 }
 
 export class ShooterEngine {
@@ -106,6 +113,7 @@ export class ShooterEngine {
   private onShotCallback: ((shot: ShooterSpectatorShotEvent) => void) | null = null;
   private onHitCallback: ((hit: ShooterSpectatorHitEvent) => void) | null = null;
   private onMatchEndCallback: (() => void) | null = null;
+  private onPreTickCallback: (() => void) | null = null;
 
   // ── Initialization ────────────────────────────────────────────────
 
@@ -141,6 +149,10 @@ export class ShooterEngine {
   onMatchEnd(cb: () => void): void {
     this.onMatchEndCallback = cb;
   }
+  /** Called before each tick so bot AI can queue actions. */
+  onPreTick(cb: () => void): void {
+    this.onPreTickCallback = cb;
+  }
 
   // ── Match lifecycle ───────────────────────────────────────────────
 
@@ -165,6 +177,10 @@ export class ShooterEngine {
     this.bulletIdCounter = 0;
     resetCharacterIndex();
 
+    // Set the default floor Y and playable bounds from spawn points
+    setDefaultFloorY(this.getFloorY());
+    setPlayableBounds(this.mapGeometry.spawnPoints);
+
     this.match = {
       id: matchId,
       phase: 'lobby',
@@ -182,13 +198,18 @@ export class ShooterEngine {
     return this.match;
   }
 
-  addPlayer(playerId: string, name: string, strategyTag?: string): ShooterPlayer | null {
+  addPlayer(
+    playerId: string,
+    name: string,
+    strategyTag?: string,
+    options?: { personality?: import('../../shared/shooter-constants.js').PersonalityType; isAI?: boolean },
+  ): ShooterPlayer | null {
     if (!this.match) return null;
     if (this.match.players.has(playerId)) return null;
 
     const spawn = this.getValidSpawnPoint();
 
-    const player = createPlayer(playerId, name, spawn, strategyTag);
+    const player = createPlayer(playerId, name, spawn, strategyTag, options);
     this.match.players.set(playerId, player);
 
     this.createPlayerBody(player);
@@ -257,6 +278,9 @@ export class ShooterEngine {
       return;
     }
 
+    // 0. Let bot AI queue actions before processing
+    this.onPreTickCallback?.();
+
     // 1. Process queued actions
     this.processActions(now);
 
@@ -293,6 +317,8 @@ export class ShooterEngine {
         case 'move':
           if (action.angle !== undefined) {
             this.moveIntents.set(playerId, { angle: action.angle });
+            // Update facing angle immediately so melee/shoot in the same tick can use it
+            player.angle = action.angle;
           }
           break;
 
@@ -503,43 +529,94 @@ export class ShooterEngine {
         return true;
       },
     );
-    return !hitsMap;
-  }
+    if (hitsMap) return false;
 
-  /** Check if a spawn point is valid (capsule at that position does not intersect map). */
-  private isSpawnInEmptySpace(spawn: SpawnPoint): boolean {
-    const centerY = spawn.y + PLAYER_CAPSULE_HALF_HEIGHT + PLAYER_CAPSULE_RADIUS;
-    return this.isPointInEmptySpace(spawn.x, centerY, spawn.z, PLAYER_CAPSULE_RADIUS + 0.2);
+    // Also verify there's ground below (ray downward must hit map within 5 units).
+    // This prevents spawning outside the map where there's no floor geometry.
+    const downRay = new this.rapier.Ray({ x, y: y + 2, z }, { x: 0, y: -1, z: 0 });
+    const groundHit = this.world.castRay(downRay, 10, true);
+    if (!groundHit) return false; // No ground below = outside the map
+    const hitBody = groundHit.collider.parent();
+    if (!hitBody || !hitBody.isFixed()) return false; // Ground must be map geometry
+
+    return true;
   }
 
   /**
-   * Get a spawn point that is both unoccupied and not inside the map mesh.
-   * Ensures no bots spawn inside geometry.
+   * Get a valid spawn point. GLB spawn points are always trusted (placed by the
+   * level designer). We just try to pick one that isn't already occupied by
+   * another player or pickup. If all are occupied, pick a random one.
    */
   private getValidSpawnPoint(): SpawnPoint {
     const spawnPoints = this.mapGeometry.spawnPoints;
+    if (spawnPoints.length === 0) return randomArenaPoint();
+
     const alivePlayers = [...this.match!.players.values()].filter((p) => p.alive);
     const pickups = this.match!.pickups.filter((p) => !p.taken).map((p) => ({ x: p.x, y: p.y, z: p.z }));
     const occupied = getOccupiedSpawnIndices(spawnPoints, alivePlayers, pickups);
 
+    // First: pick an unoccupied spawn point
+    const unoccupied: number[] = [];
     for (let i = 0; i < spawnPoints.length; i++) {
-      if (occupied.has(i)) continue;
-      const spawn = spawnPoints[i];
-      if (this.isSpawnInEmptySpace(spawn)) return spawn;
-    }
-    for (let i = 0; i < spawnPoints.length; i++) {
-      if (!occupied.has(i)) continue;
-      const spawn = spawnPoints[i];
-      if (this.isSpawnInEmptySpace(spawn)) return spawn;
+      if (!occupied.has(i)) unoccupied.push(i);
     }
 
-    const randomEmpty = randomArenaPointInEmptySpace(
-      (x, y, z, r) => this.isPointInEmptySpace(x, y, z, r),
-      PLAYER_CAPSULE_RADIUS + 0.2,
-      80,
-    );
-    if (randomEmpty) return randomEmpty;
-    return randomArenaPoint();
+    if (unoccupied.length > 0) {
+      // Pick a random unoccupied one (so bots don't always get the same spawns)
+      const idx = unoccupied[Math.floor(Math.random() * unoccupied.length)];
+      return spawnPoints[idx];
+    }
+
+    // All occupied: pick the spawn point farthest from all alive players
+    let bestIdx = 0;
+    let bestMinDist = -1;
+    for (let i = 0; i < spawnPoints.length; i++) {
+      const sp = spawnPoints[i];
+      let minDist = Infinity;
+      for (const p of alivePlayers) {
+        const dx = sp.x - p.x, dz = sp.z - p.z;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist < minDist) minDist = dist;
+      }
+      if (minDist > bestMinDist) {
+        bestMinDist = minDist;
+        bestIdx = i;
+      }
+    }
+    return spawnPoints[bestIdx];
+  }
+
+  /**
+   * Get a deterministic spawn point for respawn so the same player always
+   * respawns at the same spawn (when available), avoiding teleporting between
+   * different spawn locations.
+   */
+  private getRespawnSpawnPoint(playerId: string): SpawnPoint {
+    const spawnPoints = this.mapGeometry.spawnPoints;
+    if (spawnPoints.length === 0) return randomArenaPoint();
+
+    const alivePlayers = [...this.match!.players.values()].filter((p) => p.alive);
+    const pickups = this.match!.pickups.filter((p) => !p.taken).map((p) => ({ x: p.x, y: p.y, z: p.z }));
+    const occupied = getOccupiedSpawnIndices(spawnPoints, alivePlayers, pickups);
+
+    // Deterministic index from player id so same player gets same spawn when possible
+    let hash = 0;
+    for (let i = 0; i < playerId.length; i++) hash = (hash * 31 + playerId.charCodeAt(i)) >>> 0;
+    const preferredIdx = hash % spawnPoints.length;
+
+    if (!occupied.has(preferredIdx)) return spawnPoints[preferredIdx];
+
+    // Preferred spawn is occupied: use next unoccupied in order
+    const unoccupied: number[] = [];
+    for (let i = 0; i < spawnPoints.length; i++) {
+      if (!occupied.has(i)) unoccupied.push(i);
+    }
+    if (unoccupied.length > 0) {
+      const idx = unoccupied[Math.floor(Math.random() * unoccupied.length)];
+      return spawnPoints[idx];
+    }
+
+    return spawnPoints[preferredIdx];
   }
 
   private syncPositions(): void {
@@ -554,7 +631,9 @@ export class ShooterEngine {
 
       const pos = body.rigidBody.translation();
       player.x = pos.x;
-      player.y = pos.y;
+      // Store the feet-level Y (capsule center minus half-height minus radius)
+      // so the client can position characters without guessing offsets.
+      player.y = pos.y - PLAYER_CAPSULE_HALF_HEIGHT - PLAYER_CAPSULE_RADIUS;
       player.z = pos.z;
 
       const skinBound = PLAYER_CAPSULE_RADIUS + 0.15;
@@ -580,6 +659,199 @@ export class ShooterEngine {
     }
   }
 
+  // ── Line-of-sight & raycasting (used by bot AI) ──────────────────
+
+  /**
+   * Check line-of-sight between two XZ positions at chest height.
+   * Returns true if the ray reaches the target without hitting map geometry.
+   * Player bodies are kinematic and won't block the ray by default.
+   */
+  hasLineOfSight(
+    fromX: number, fromZ: number,
+    toX: number, toZ: number,
+    excludePlayerId?: string,
+  ): boolean {
+    if (!this.world) return false;
+
+    const dx = toX - fromX;
+    const dz = toZ - fromZ;
+    const len = Math.sqrt(dx * dx + dz * dz);
+    if (len < 0.01) return true;
+
+    // Use the actual player body Y so rays match the player's height in the world
+    const rayHeight = this.getPlayerRayHeight(excludePlayerId);
+    const origin = { x: fromX, y: rayHeight, z: fromZ };
+    const direction = { x: dx / len, y: 0, z: dz / len };
+    const ray = new this.rapier.Ray(origin, direction);
+
+    const excludeBody = excludePlayerId
+      ? this.playerBodies.get(excludePlayerId)?.rigidBody ?? undefined
+      : undefined;
+
+    const hit = this.world.castRay(
+      ray,
+      len,
+      true,           // solid
+      undefined,       // filter flags
+      undefined,       // filter groups
+      undefined,       // exclude collider
+      excludeBody,     // exclude rigid body
+    );
+
+    if (!hit) return true;
+
+    // Check if the hit was against a fixed body (map). If not, treat as clear.
+    const hitBody = hit.collider.parent();
+    if (hitBody && hitBody.isFixed()) {
+      // LOS threshold: allow 98% of the distance (small tolerance)
+      return hit.timeOfImpact >= len * 0.98;
+    }
+
+    return true;
+  }
+
+  /**
+   * Cast a ray in a given direction (angle in degrees) from a position.
+   * Returns the distance to the first hit (map/fixed body), or Infinity if clear.
+   * Used by bot AI for obstacle avoidance.
+   */
+  castRayInDirection(
+    fromX: number, fromZ: number,
+    angleDeg: number,
+    maxDist: number,
+    excludePlayerId?: string,
+  ): number {
+    if (!this.world) return Infinity;
+
+    const rad = (angleDeg * Math.PI) / 180;
+    const dirX = Math.cos(rad);
+    const dirZ = Math.sin(rad);
+
+    // Use the actual player body Y so rays match the player's height in the world
+    const rayHeight = this.getPlayerRayHeight(excludePlayerId);
+    const origin = { x: fromX, y: rayHeight, z: fromZ };
+    const direction = { x: dirX, y: 0, z: dirZ };
+    const ray = new this.rapier.Ray(origin, direction);
+
+    const excludeBody = excludePlayerId
+      ? this.playerBodies.get(excludePlayerId)?.rigidBody ?? undefined
+      : undefined;
+
+    const hit = this.world.castRay(
+      ray,
+      maxDist,
+      true,
+      undefined,
+      undefined,
+      undefined,
+      excludeBody,
+    );
+
+    if (!hit) return Infinity;
+
+    const hitBody = hit.collider.parent();
+    if (hitBody && hitBody.isFixed()) {
+      return hit.timeOfImpact;
+    }
+
+    return Infinity;
+  }
+
+  /**
+   * Try the desired direction first, then offsets (+/-30, +/-60, +/-90 degrees).
+   * Returns the angle (degrees) with the longest clear distance.
+   */
+  findClearDirection(
+    fromX: number, fromZ: number,
+    desiredAngleDeg: number,
+    lookahead: number,
+    excludePlayerId?: string,
+  ): number {
+    const offsets = [0, 30, -30, 60, -60, 90, -90];
+    let bestAngle = desiredAngleDeg;
+    let bestDist = 0;
+
+    for (const off of offsets) {
+      const angle = desiredAngleDeg + off;
+      const dist = this.castRayInDirection(fromX, fromZ, angle, lookahead, excludePlayerId);
+      if (dist > bestDist) {
+        bestDist = dist;
+        bestAngle = angle;
+      }
+    }
+    return bestAngle;
+  }
+
+  /**
+   * Eight directions every 45 degrees; returns the angle with the longest clear
+   * distance, preferring directions closer to targetAngleDeg.
+   */
+  findLongestClearDirection(
+    fromX: number, fromZ: number,
+    targetAngleDeg: number,
+    maxDist: number,
+    excludePlayerId?: string,
+  ): number {
+    const candidates: { angle: number; dist: number; diffAbs: number }[] = [];
+
+    for (let i = 0; i < 8; i++) {
+      const angle = i * 45;
+      const dist = this.castRayInDirection(fromX, fromZ, angle, maxDist, excludePlayerId);
+      let diff = angle - targetAngleDeg;
+      while (diff > 180) diff -= 360;
+      while (diff < -180) diff += 360;
+      candidates.push({ angle, dist, diffAbs: Math.abs(diff) });
+    }
+
+    candidates.sort((a, b) => {
+      if (Math.abs(b.dist - a.dist) < 0.1) return a.diffAbs - b.diffAbs;
+      return b.dist - a.dist;
+    });
+
+    return candidates[0].angle;
+  }
+
+  /**
+   * Get the Y height for raycasting from a player's actual body position.
+   * Falls back to a reasonable default if player not found.
+   */
+  private getPlayerRayHeight(playerId?: string): number {
+    if (playerId) {
+      const body = this.playerBodies.get(playerId);
+      if (body) {
+        return body.rigidBody.translation().y;
+      }
+      // Also try from player state
+      const player = this.match?.players.get(playerId);
+      if (player) {
+        return player.y + PLAYER_CAPSULE_HALF_HEIGHT + PLAYER_CAPSULE_RADIUS;
+      }
+    }
+    // Fallback: use the average Y of alive players, or the first spawn point Y + capsule offset
+    if (this.match) {
+      for (const p of this.match.players.values()) {
+        if (p.alive) {
+          const body = this.playerBodies.get(p.id);
+          if (body) return body.rigidBody.translation().y;
+        }
+      }
+    }
+    // Last resort: use first spawn point
+    if (this.mapGeometry.spawnPoints.length > 0) {
+      return this.mapGeometry.spawnPoints[0].y + PLAYER_CAPSULE_HALF_HEIGHT + PLAYER_CAPSULE_RADIUS;
+    }
+    return PLAYER_CAPSULE_HALF_HEIGHT + PLAYER_CAPSULE_RADIUS;
+  }
+
+  /** Get the floor Y level (average of spawn point Y values). Used for pickups. */
+  getFloorY(): number {
+    const spawns = this.mapGeometry.spawnPoints;
+    if (spawns.length === 0) return 0;
+    let sum = 0;
+    for (const sp of spawns) sum += sp.y;
+    return sum / spawns.length;
+  }
+
   // ── Combat ────────────────────────────────────────────────────────
 
   /** Spawn physical bullet rigid bodies instead of raycasts. */
@@ -592,7 +864,14 @@ export class ShooterEngine {
     player.ammo = consumeAmmo(player.ammo);
 
     const ownBody = this.playerBodies.get(player.id);
-    const gunHeight = player.y + PLAYER_CAPSULE_HALF_HEIGHT + 0.3;
+    // player.y is now feet-level; gun is at roughly chest height (feet + capsule height + a bit)
+    const gunHeight = player.y + PLAYER_CAPSULE_HALF_HEIGHT * 2 + PLAYER_CAPSULE_RADIUS + 0.3;
+
+    // Use the character's facing direction for the muzzle offset so bullets
+    // always appear to come from the gun barrel, not from the side
+    const facingRad = (player.angle * Math.PI) / 180;
+    const muzzleX = player.x + Math.cos(facingRad) * 0.8;
+    const muzzleZ = player.z + Math.sin(facingRad) * 0.8;
 
     for (let i = 0; i < stats.pellets; i++) {
       const spreadAngle = aimAngle + (Math.random() - 0.5) * stats.spread * (180 / Math.PI);
@@ -602,9 +881,10 @@ export class ShooterEngine {
 
       const bulletId = `bullet_${++this.bulletIdCounter}_${Date.now()}`;
       const bodyDesc = this.rapier.RigidBodyDesc.dynamic()
-        .setTranslation(player.x + dirX * 0.5, gunHeight, player.z + dirZ * 0.5)
+        .setTranslation(muzzleX, gunHeight, muzzleZ)
         .setLinearDamping(0)
-        .setCcdEnabled(true);
+        .setCcdEnabled(true)
+        .setGravityScale(0); // Bullets travel in straight lines, no gravity
       const rigidBody = this.world.createRigidBody(bodyDesc);
       rigidBody.setLinvel({ x: dirX * BULLET_SPEED, y: 0, z: dirZ * BULLET_SPEED }, true);
       rigidBody.setAdditionalMass(BULLET_MASS, true);
@@ -623,20 +903,25 @@ export class ShooterEngine {
         damage: stats.damage,
         weaponType: player.weapon,
         spawnTime: now,
-        fromX: player.x,
-        fromZ: player.z,
+        fromX: muzzleX,
+        fromY: gunHeight,
+        fromZ: muzzleZ,
+        prevX: muzzleX,
+        prevY: gunHeight,
+        prevZ: muzzleZ,
       });
     }
 
-    // Emit shot event on fire for audio only (no long trail – client draws trail only on impact)
+    // Emit a short muzzle-flash trail (2 units). Full trails are only
+    // emitted on hit:true events (when bullets actually collide).
     const aimRad = (aimAngle * Math.PI) / 180;
-    const muzzleLen = 1.5;
+    const muzzleLen = 2;
     this.onShotCallback?.({
       shooterId: player.id,
-      fromX: player.x,
-      fromZ: player.z,
-      toX: player.x + Math.cos(aimRad) * muzzleLen,
-      toZ: player.z + Math.sin(aimRad) * muzzleLen,
+      fromX: muzzleX,
+      fromZ: muzzleZ,
+      toX: muzzleX + Math.cos(aimRad) * muzzleLen,
+      toZ: muzzleZ + Math.sin(aimRad) * muzzleLen,
       weapon: player.weapon,
       hit: false,
     });
@@ -650,7 +935,15 @@ export class ShooterEngine {
     }
   }
 
-  /** After physics step: resolve bullet contacts, apply damage, remove hit/expired bullets. */
+  /**
+   * After physics step: detect bullet collisions via swept raycasts.
+   *
+   * For each bullet, cast a ray from its previous position to its current
+   * position. If the ray hits map geometry (fixed body), the bullet stops
+   * at the impact point. If it passes through a player's capsule, apply
+   * damage. This is far more reliable than contactPairsWith for fast
+   * projectiles against trimeshes.
+   */
   private processBulletHits(now: number): void {
     const bulletsToRemove = new Set<ActiveBullet>();
 
@@ -661,6 +954,8 @@ export class ShooterEngine {
       }
 
       const pos = bullet.rigidBody.translation();
+
+      // Range check
       const distSq = (pos.x - bullet.fromX) ** 2 + (pos.z - bullet.fromZ) ** 2;
       const maxRange = WEAPON_STATS[bullet.weaponType]?.range ?? 50;
       if (distSq > (maxRange + 5) ** 2) {
@@ -668,24 +963,79 @@ export class ShooterEngine {
         continue;
       }
 
+      // Swept raycast from previous position to current position
+      const dx = pos.x - bullet.prevX;
+      const dy = pos.y - bullet.prevY;
+      const dz = pos.z - bullet.prevZ;
+      const travelDist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+      if (travelDist < 0.001) {
+        // Update prev position
+        bullet.prevX = pos.x;
+        bullet.prevY = pos.y;
+        bullet.prevZ = pos.z;
+        continue;
+      }
+
+      const dirX = dx / travelDist;
+      const dirY = dy / travelDist;
+      const dirZ = dz / travelDist;
+
+      const ray = new this.rapier.Ray(
+        { x: bullet.prevX, y: bullet.prevY, z: bullet.prevZ },
+        { x: dirX, y: dirY, z: dirZ },
+      );
+
+      // Cast ray -- this hits ALL colliders (map + players)
+      const hit = this.world.castRay(ray, travelDist, true);
+
       let hitPlayerId: string | null = null;
       let hitMap = false;
+      let hitX = pos.x;
+      let hitZ = pos.z;
 
-      this.world.contactPairsWith(bullet.collider, (other: RAPIER.Collider) => {
-        const otherBody = other.parent();
-        if (!otherBody) return;
-        if (otherBody.isKinematic()) {
-          for (const [pid, pb] of this.playerBodies) {
-            if (pb.rigidBody.handle === otherBody.handle && pid !== bullet.ownerId) {
-              const victim = this.match!.players.get(pid);
-              if (victim && victim.alive) hitPlayerId = pid;
-              return;
+      if (hit) {
+        const hitBody = hit.collider.parent();
+        if (hitBody) {
+          if (hitBody.isFixed()) {
+            // Hit map geometry
+            hitMap = true;
+            hitX = bullet.prevX + dirX * hit.timeOfImpact;
+            hitZ = bullet.prevZ + dirZ * hit.timeOfImpact;
+          } else if (hitBody.isKinematic()) {
+            // Check if this is a player body (not ourselves)
+            for (const [pid, pb] of this.playerBodies) {
+              if (pb.rigidBody.handle === hitBody.handle && pid !== bullet.ownerId) {
+                const victim = this.match!.players.get(pid);
+                if (victim && victim.alive) {
+                  hitPlayerId = pid;
+                  hitX = bullet.prevX + dirX * hit.timeOfImpact;
+                  hitZ = bullet.prevZ + dirZ * hit.timeOfImpact;
+                }
+                break;
+              }
             }
           }
-        } else if (otherBody.isFixed()) {
-          hitMap = true;
         }
-      });
+      }
+
+      // Also check proximity to player capsules (backup for narrow misses)
+      if (!hitPlayerId && !hitMap) {
+        for (const [pid, pb] of this.playerBodies) {
+          if (pid === bullet.ownerId) continue;
+          const victim = this.match!.players.get(pid);
+          if (!victim || !victim.alive) continue;
+          const pdx = victim.x - pos.x;
+          const pdz = victim.z - pos.z;
+          const pDist = Math.sqrt(pdx * pdx + pdz * pdz);
+          if (pDist < PLAYER_CAPSULE_RADIUS + BULLET_RADIUS + 0.3) {
+            hitPlayerId = pid;
+            hitX = pos.x;
+            hitZ = pos.z;
+            break;
+          }
+        }
+      }
 
       if (hitPlayerId) {
         const victim = this.match!.players.get(hitPlayerId)!;
@@ -700,8 +1050,8 @@ export class ShooterEngine {
           victimId: hitPlayerId,
           fromX: bullet.fromX,
           fromZ: bullet.fromZ,
-          toX: pos.x,
-          toZ: pos.z,
+          toX: hitX,
+          toZ: hitZ,
           weapon: bullet.weaponType,
           damage: bullet.damage,
           killed,
@@ -710,8 +1060,8 @@ export class ShooterEngine {
           shooterId: bullet.ownerId,
           fromX: bullet.fromX,
           fromZ: bullet.fromZ,
-          toX: pos.x,
-          toZ: pos.z,
+          toX: hitX,
+          toZ: hitZ,
           weapon: bullet.weaponType,
           hit: true,
         });
@@ -721,13 +1071,18 @@ export class ShooterEngine {
           shooterId: bullet.ownerId,
           fromX: bullet.fromX,
           fromZ: bullet.fromZ,
-          toX: pos.x,
-          toZ: pos.z,
+          toX: hitX,
+          toZ: hitZ,
           weapon: bullet.weaponType,
           hit: true,
         });
         bulletsToRemove.add(bullet);
       }
+
+      // Update previous position for next frame
+      bullet.prevX = pos.x;
+      bullet.prevY = pos.y;
+      bullet.prevZ = pos.z;
     }
 
     for (const bullet of bulletsToRemove) {
@@ -748,11 +1103,12 @@ export class ShooterEngine {
 
     player.lastShotTime = now;
 
-    // Find closest enemy within melee range and in front of player
-    const rad = (player.angle * Math.PI) / 180;
-    const facingX = Math.cos(rad);
-    const facingZ = Math.sin(rad);
-    let closestDist = stats.range + 0.5;
+    // Use a generous melee range (knife range + 1.0) to account for movement between ticks
+    const meleeReach = stats.range + 1.0;
+
+    // Find closest enemy within melee range -- no facing check (melee is 360 degrees)
+    // This prevents issues where the bot is right next to an enemy but facing slightly wrong
+    let closestDist = meleeReach;
     let closestVictim: ShooterPlayer | null = null;
 
     for (const other of this.match!.players.values()) {
@@ -760,11 +1116,7 @@ export class ShooterEngine {
       const dx = other.x - player.x;
       const dz = other.z - player.z;
       const dist = Math.sqrt(dx * dx + dz * dz);
-      if (dist > stats.range + 0.5) continue;
-
-      // Check roughly in front (dot product; allow slight behind for desync)
-      const dot = dx * facingX + dz * facingZ;
-      if (dot < -0.35 && dist > 1) continue;
+      if (dist > meleeReach) continue;
 
       if (dist < closestDist) {
         closestDist = dist;
@@ -774,7 +1126,8 @@ export class ShooterEngine {
 
     if (closestVictim) {
       // Raycast to check line of sight (can't knife through walls)
-      const origin = { x: player.x, y: player.y, z: player.z };
+      const rayY = this.getPlayerRayHeight(player.id);
+      const origin = { x: player.x, y: rayY, z: player.z };
       const dx = closestVictim.x - player.x;
       const dz = closestVictim.z - player.z;
       const dist = Math.sqrt(dx * dx + dz * dz);
@@ -792,17 +1145,13 @@ export class ShooterEngine {
         this.playerBodies.get(player.id)?.rigidBody,
       );
 
-      // Block only if we hit the map (fixed body) before the victim
+      // Block only if a fixed (map) body is between attacker and victim
       if (hit) {
-        const victimBody = this.playerBodies.get(closestVictim.id);
         const hitBody = hit.collider.parent();
-        const hitVictim = victimBody && hit.collider.handle === victimBody.collider.handle;
-        if (!hitVictim && hitBody && hitBody.isFixed()) {
-          return; // Blocked by wall
+        if (hitBody && hitBody.isFixed() && hit.timeOfImpact < dist * 0.9) {
+          return; // Wall between attacker and victim
         }
-        if (!hitVictim && hitBody && !hitBody.isFixed()) {
-          return; // Hit another player (not our target) — don't damage
-        }
+        // Don't block melee because of other players' bodies
       }
 
       const killed = damagePlayer(closestVictim, stats.damage, player.id);
@@ -879,16 +1228,17 @@ export class ShooterEngine {
       if (player.alive || player.eliminated || !player.diedAt) continue;
       if (now - player.diedAt < RESPAWN_DELAY_MS) continue;
 
-      const spawn = this.getValidSpawnPoint();
+      // Use deterministic spawn per player so respawned bots don't jump between spawn points
+      const spawn = this.getRespawnSpawnPoint(player.id);
 
       if (respawnPlayer(player, spawn)) {
         const body = this.playerBodies.get(player.id);
         if (body) {
-          body.rigidBody.setNextKinematicTranslation({
-            x: spawn.x,
-            y: spawn.y + PLAYER_CAPSULE_HALF_HEIGHT + PLAYER_CAPSULE_RADIUS,
-            z: spawn.z,
-          });
+          const bodyY = spawn.y + PLAYER_CAPSULE_HALF_HEIGHT + PLAYER_CAPSULE_RADIUS;
+          const pos = { x: spawn.x, y: bodyY, z: spawn.z };
+          body.rigidBody.setNextKinematicTranslation(pos);
+          // Set current position immediately so sync/broadcast this tick has correct position
+          body.rigidBody.setTranslation(pos, true);
         }
       }
     }
@@ -1045,6 +1395,7 @@ export class ShooterEngine {
       id: p.id,
       name: p.name,
       character: p.character,
+      personality: p.personality,
       x: Math.round(p.x * 100) / 100,
       y: Math.round(p.y * 100) / 100,
       z: Math.round(p.z * 100) / 100,
@@ -1078,6 +1429,7 @@ export class ShooterEngine {
         y: Math.round(pos.y * 100) / 100,
         z: Math.round(pos.z * 100) / 100,
         fromX: b.fromX,
+        fromY: b.fromY,
         fromZ: b.fromZ,
         ownerId: b.ownerId,
         weapon: b.weaponType,
@@ -1112,6 +1464,7 @@ export class ShooterEngine {
       id: p.id,
       name: p.name,
       character: p.character,
+      personality: p.personality,
       x: Math.round(p.x * 100) / 100,
       y: Math.round(p.y * 100) / 100,
       z: Math.round(p.z * 100) / 100,
@@ -1145,6 +1498,7 @@ export class ShooterEngine {
         y: Math.round(pos.y * 100) / 100,
         z: Math.round(pos.z * 100) / 100,
         fromX: b.fromX,
+        fromY: b.fromY,
         fromZ: b.fromZ,
         ownerId: b.ownerId,
         weapon: b.weaponType,
@@ -1162,7 +1516,7 @@ export class ShooterEngine {
     };
   }
 
-  /** Build the leaderboard sorted by survival time (desc), then kills. */
+  /** Build the leaderboard sorted by survival time (desc), then KDA (desc), then kills (desc). */
   getLeaderboard(): { id: string; name: string; kills: number; deaths: number; survivalTime: number }[] {
     if (!this.match) return [];
     return [...this.match.players.values()]
@@ -1173,6 +1527,15 @@ export class ShooterEngine {
         deaths: p.deaths,
         survivalTime: Math.round(getTotalSurvivalSeconds(p) * 10) / 10,
       }))
-      .sort((a, b) => b.survivalTime - a.survivalTime || b.kills - a.kills);
+      .sort((a, b) => {
+        // Primary: survival time (desc)
+        if (Math.abs(b.survivalTime - a.survivalTime) > 0.5) return b.survivalTime - a.survivalTime;
+        // Secondary: KDA (kills - deaths) desc
+        const kdaA = a.kills - a.deaths;
+        const kdaB = b.kills - b.deaths;
+        if (kdaA !== kdaB) return kdaB - kdaA;
+        // Tertiary: kills desc
+        return b.kills - a.kills;
+      });
   }
 }

@@ -38,17 +38,17 @@ const BULLET_TRAIL_COLOR = {
   knife: "#94a3b8",
 };
 
-/** Bullet box size per weapon – exact match to shooter-blitz reference (width, height, length). */
+/** Bullet box size: short tracers, no bloom. Length is along travel direction. */
 const BULLET_SIZE_BY_WEAPON = {
-  smg: [0.03, 0.03, 0.35],
-  default: [0.05, 0.05, 0.5],
+  smg: [0.04, 0.04, 0.15],
+  default: [0.05, 0.05, 0.2],
 };
 
-/** Color-scalar multiplier for the extreme bloom glow (matches shooter-blitz ×42). */
-const BULLET_COLOR_MULTIPLIER = 42;
+/** No bloom: use normal color. */
+const BULLET_COLOR_MULTIPLIER = 1;
 
-/** Scale bullets up so they are visible from spectator camera in the large arena. */
-const BULLET_VISIBLE_SCALE = 5;
+/** Scale so bullets are visible but not larger than characters. */
+const BULLET_VISIBLE_SCALE = 1.5;
 import { CharacterPlayer } from "./CharacterPlayer";
 import { WeaponPickup } from "./WeaponPickup";
 import { BotClickCapture } from "./BotClickCapture";
@@ -67,14 +67,18 @@ const ARENA_MAX_X = 45;
 const ARENA_MIN_Z = -45;
 const ARENA_MAX_Z = 45;
 const DEBUG_COLLIDERS = false;
-/** Extra Y offset: character is drawn this many units below server capsule center. */
-const CHARACTER_Y_EXTRA_OFFSET = 1.75;
+/**
+ * Extra Y offset: the server now sends the feet-level Y directly
+ * (capsule center - halfHeight - radius). We just need a small offset
+ * to align the character model's feet to this ground level.
+ */
+const CHARACTER_Y_EXTRA_OFFSET = 0;
 /** Debug capsule: 50% longer than server capsule. */
 const DEBUG_CAPSULE_LENGTH_SCALE = 1.5;
 /** Debug capsule: move center down by 32.5% of its height. */
 const DEBUG_CAPSULE_Y_DOWN = (CAPSULE_HALF_HEIGHT * 2) * 0.325;
 /** Extra downward offset applied to both character and debug capsule. */
-const CHARACTER_AND_CAPSULE_DOWN_EXTRA = 0.15;
+const CHARACTER_AND_CAPSULE_DOWN_EXTRA = 0;
 /** Scale factor for character and debug capsule (0.5 = 50%). */
 const CHARACTER_AND_CAPSULE_SCALE = 1;
 
@@ -86,9 +90,19 @@ function getAnimation(player, isMoving, recentlyShot) {
   return "Idle";
 }
 
-/** Single server-driven player character. */
-function ServerPlayer({ player, prevPosRef, shots = [] }) {
+/** Personality badge color for spectator HUD. */
+const PERSONALITY_COLORS = {
+  Aggressive: "#ef4444",
+  Cautious: "#3b82f6",
+  Sniper: "#a855f7",
+  Rusher: "#f97316",
+  Tactician: "#22c55e",
+};
+
+/** Single server-driven player character with damage flash and personality display. */
+function ServerPlayer({ player, prevPosRef, shots = [], hits = [] }) {
   const groupRef = useRef();
+  const damageFlashRef = useRef(0); // countdown for red flash
 
   // Track whether this player is moving (for animation)
   const isMoving = useMemo(() => {
@@ -103,26 +117,43 @@ function ServerPlayer({ player, prevPosRef, shots = [] }) {
     prevPosRef.current = { x: player.x, z: player.z };
   });
 
-  const centerY = player.y ?? 0;
-  const feetY = centerY - FEET_OFFSET - CHARACTER_Y_EXTRA_OFFSET - CHARACTER_AND_CAPSULE_DOWN_EXTRA;
+  // Trigger damage flash when this player is hit
+  const wasHit = hits.some((h) => h && h.victimId === player.id);
+  useEffect(() => {
+    if (wasHit) damageFlashRef.current = 0.3; // 300ms flash
+  }, [wasHit, hits]);
+
+  // Server sends feet-level Y; character model has internal +FEET_OFFSET so it stands on this point
+  const feetY = (player.y ?? 0);
   const targetPos = useRef(new Vector3(player.x, feetY, player.z));
   targetPos.current.set(player.x, feetY, player.z);
 
   useFrame((_, delta) => {
     if (!groupRef.current) return;
     const pos = groupRef.current.position;
-    pos.lerp(targetPos.current, Math.min(1, 15 * delta));
+    pos.lerp(targetPos.current, Math.min(1, 6 * delta));
 
     // Rotate to face movement direction
     const rad = ((player.angle ?? 0) * Math.PI) / 180;
-    // Model faces +Z by default, angle 0 = +X, so rotate Y = -(angle) + 90deg
     const targetRotY = -rad + Math.PI / 2;
     groupRef.current.rotation.y += (targetRotY - groupRef.current.rotation.y) * Math.min(1, 10 * delta);
+
+    // Fade damage flash
+    if (damageFlashRef.current > 0) {
+      damageFlashRef.current = Math.max(0, damageFlashRef.current - delta);
+    }
   });
 
   const recentlyShot = shots.some((s) => s && s.shooterId === player.id);
   const animation = getAnimation(player, isMoving, recentlyShot);
   const character = player.character || "G_1";
+  const personality = player.personality;
+  const personalityColor = PERSONALITY_COLORS[personality] || "#888";
+
+  // Weapon info for HUD
+  const weaponLabel = player.weapon !== "knife"
+    ? ` [${(player.weapon || "").replace("_", " ").toUpperCase()}${player.ammo != null ? `: ${player.ammo}` : ""}]`
+    : "";
 
   return (
     <group
@@ -130,7 +161,7 @@ function ServerPlayer({ player, prevPosRef, shots = [] }) {
       position={[player.x, feetY, player.z]}
       userData={{ botId: player.id }}
     >
-      {/* Character model; offset up so capsule center is at (x, centerY, z) */}
+      {/* Character model */}
       <group position={[0, FEET_OFFSET, 0]} scale={2 * CHARACTER_AND_CAPSULE_SCALE}>
         <CharacterPlayer
           character={character}
@@ -138,9 +169,31 @@ function ServerPlayer({ player, prevPosRef, shots = [] }) {
           weapon={player.weapon || "knife"}
         />
       </group>
-      {/* Name + health billboard (above character when alive); dead bots keep mesh visible with Death animation */}
+
+      {/* Damage flash: red point light that fades quickly when hit */}
+      {damageFlashRef.current > 0 && (
+        <pointLight
+          position={[0, FEET_OFFSET + 1, 0]}
+          color="#ff0000"
+          intensity={damageFlashRef.current * 15}
+          distance={4}
+        />
+      )}
+
+      {/* Muzzle flash: brief bright light when shooting */}
+      {recentlyShot && player.alive && (
+        <pointLight
+          position={[0, FEET_OFFSET + 1.5, 0.5]}
+          color={BULLET_TRAIL_COLOR[player.weapon] || "#ffff00"}
+          intensity={8}
+          distance={5}
+        />
+      )}
+
+      {/* Name + weapon + health billboard HUD */}
       {player.alive && (
         <Billboard position={[0, FEET_OFFSET + 3.8, 0]}>
+          {/* Name */}
           <Text
             fontSize={0.45}
             color="white"
@@ -150,11 +203,47 @@ function ServerPlayer({ player, prevPosRef, shots = [] }) {
           >
             {player.name}
           </Text>
-          {/* Health bar */}
+          {/* Personality badge + weapon info */}
+          {personality && (
+            <Text
+              position={[0, 0.55, 0]}
+              fontSize={0.25}
+              color={personalityColor}
+              outlineWidth={0.03}
+              outlineColor="black"
+              anchorY="bottom"
+            >
+              {personality}{weaponLabel}
+            </Text>
+          )}
+          {!personality && weaponLabel && (
+            <Text
+              position={[0, 0.55, 0]}
+              fontSize={0.25}
+              color="#94a3b8"
+              outlineWidth={0.03}
+              outlineColor="black"
+              anchorY="bottom"
+            >
+              {weaponLabel}
+            </Text>
+          )}
+          {/* Lives indicator */}
+          <Text
+            position={[0, -0.42, 0]}
+            fontSize={0.2}
+            color="#94a3b8"
+            outlineWidth={0.02}
+            outlineColor="black"
+          >
+            {"♥".repeat(Math.max(0, player.lives ?? 0))}
+          </Text>
+          {/* Health bar background */}
           <mesh position={[0, -0.2, 0]}>
             <planeGeometry args={[1.6, 0.16]} />
             <meshBasicMaterial color="#333" transparent opacity={0.7} />
           </mesh>
+          {/* Health bar fill */}
           <mesh position={[-(1.6 - (1.6 * (player.health ?? 100)) / 100) / 2, -0.2, 0.001]}>
             <planeGeometry args={[(1.6 * (player.health ?? 100)) / 100, 0.16]} />
             <meshBasicMaterial
@@ -166,6 +255,20 @@ function ServerPlayer({ player, prevPosRef, shots = [] }) {
           </mesh>
         </Billboard>
       )}
+
+      {/* Death indicator: faded name when eliminated */}
+      {!player.alive && player.eliminated && (
+        <Billboard position={[0, FEET_OFFSET + 2, 0]}>
+          <Text
+            fontSize={0.35}
+            color="#666"
+            outlineWidth={0.03}
+            outlineColor="black"
+          >
+            {player.name} (eliminated)
+          </Text>
+        </Billboard>
+      )}
     </group>
   );
 }
@@ -175,18 +278,19 @@ const bulletMaterialCache = {};
 function getBulletMaterial(weapon) {
   if (bulletMaterialCache[weapon]) return bulletMaterialCache[weapon];
   const hex = BULLET_COLOR_BY_WEAPON[weapon] ?? BULLET_COLOR_BY_WEAPON.pistol;
-  const mat = new MeshBasicMaterial({ color: hex, toneMapped: false });
-  mat.color.multiplyScalar(BULLET_COLOR_MULTIPLIER);
+  const mat = new MeshBasicMaterial({ color: hex, toneMapped: true });
+  if (BULLET_COLOR_MULTIPLIER !== 1) mat.color.multiplyScalar(BULLET_COLOR_MULTIPLIER);
   bulletMaterialCache[weapon] = mat;
   return mat;
 }
 
 /**
- * Single server-driven bullet – same visual as shooter-blitz Bullet.jsx:
- * elongated box tracer, MeshBasicMaterial with color×42, rotation aligned to travel.
- * Scaled up (BULLET_VISIBLE_SCALE) so projectiles are clearly visible in the arena.
+ * Single server-driven bullet: only the bullet mesh, no trail.
  */
 function ServerBullet({ bullet }) {
+  const groupRef = useRef();
+  const targetPos = useRef(new Vector3(bullet.x ?? 0, bullet.y ?? 0, bullet.z ?? 0));
+
   const x = bullet.x ?? 0;
   const y = bullet.y ?? 0;
   const z = bullet.z ?? 0;
@@ -196,20 +300,26 @@ function ServerBullet({ bullet }) {
   const material = getBulletMaterial(weapon);
   const size = BULLET_SIZE_BY_WEAPON[weapon] ?? BULLET_SIZE_BY_WEAPON.default;
 
-  const fromX = bullet.fromX ?? x;
-  const fromZ = bullet.fromZ ?? z;
-  const dx = x - fromX;
-  const dz = z - fromZ;
+  targetPos.current.set(x, y, z);
+
+  const dx = x - (bullet.fromX ?? x);
+  const dz = z - (bullet.fromZ ?? z);
   const len = Math.sqrt(dx * dx + dz * dz) || 1;
   const angle = Math.atan2(dx / len, dz / len);
 
+  useFrame((_, delta) => {
+    if (!groupRef.current) return;
+    groupRef.current.position.lerp(targetPos.current, Math.min(1, 25 * delta));
+  });
+
   return (
     <group
+      ref={groupRef}
       position={[x, y, z]}
       rotation-y={angle}
       scale={BULLET_VISIBLE_SCALE}
     >
-      <mesh position-z={0.25} material={material} castShadow>
+      <mesh position-z={size[2] * 0.5} material={material}>
         <boxGeometry args={size} />
       </mesh>
     </group>
@@ -220,7 +330,7 @@ const MAX_IMPACT_EFFECTS = 12;
 const MAX_SEEN_HIT_IDS = 50;
 
 export const Experience = ({ downgradedPerformance = false }) => {
-  const { gameState, shots, gamePhase } = useGameManager();
+  const { gameState, shots, hits, gamePhase } = useGameManager();
   const prevPosRefs = useRef(new Map());
   const [impactEffects, setImpactEffects] = useState([]);
   const seenHitIdsRef = useRef(new Set());
@@ -278,7 +388,7 @@ export const Experience = ({ downgradedPerformance = false }) => {
         />
       ))}
 
-      {/* Physical bullets: elongated box tracers matching shooter-blitz style */}
+      {/* Physical bullets: elongated box tracers + live trail lines from origin */}
       {bullets.map((b) => (
         <ServerBullet key={b.id} bullet={b} />
       ))}
@@ -290,6 +400,7 @@ export const Experience = ({ downgradedPerformance = false }) => {
           player={player}
           prevPosRef={prevPosRefs.current.get(player.id)}
           shots={shots}
+          hits={hits}
         />
       ))}
 
@@ -333,22 +444,6 @@ export const Experience = ({ downgradedPerformance = false }) => {
         </>
       )}
 
-      {/* Impact trails only (no hitscan lines – bullets are the moving ServerBullet meshes) */}
-      {shots
-        .filter((shot) => shot.hit === true)
-        .map((shot) => (
-          <BulletTrail
-            key={`trail-${shot._id}`}
-            fromX={shot.fromX}
-            fromZ={shot.fromZ}
-            toX={shot.toX}
-            toZ={shot.toZ}
-            hit={true}
-            weapon={shot.weapon}
-            trailY={bulletY}
-          />
-        ))}
-
       {/* Impact effects (shooter-blitz style BulletHit at impact position) */}
       {impactEffects.map((impact) => (
         <BulletHit
@@ -365,40 +460,3 @@ export const Experience = ({ downgradedPerformance = false }) => {
   );
 };
 
-/** Bullet trail: weapon-colored line that fades. Hit trails are red. */
-function BulletTrail({ fromX, fromZ, toX, toZ, hit, weapon, trailY = 1.2 }) {
-  const ref = useRef();
-  const opacityRef = useRef(1);
-
-  useFrame((_, delta) => {
-    if (!ref.current) return;
-    opacityRef.current = Math.max(0, opacityRef.current - delta * 2.5);
-    ref.current.material.opacity = opacityRef.current;
-    if (opacityRef.current <= 0) {
-      ref.current.visible = false;
-    }
-  });
-
-  const color = hit
-    ? "#ff4444"
-    : (BULLET_TRAIL_COLOR[weapon] ?? "#ffff00");
-
-  return (
-    <line ref={ref}>
-      <bufferGeometry>
-        <bufferAttribute
-          attach="attributes-position"
-          count={2}
-          array={new Float32Array([fromX, trailY, fromZ, toX, trailY, toZ])}
-          itemSize={3}
-        />
-      </bufferGeometry>
-      <lineBasicMaterial
-        color={color}
-        transparent
-        opacity={1}
-        linewidth={2}
-      />
-    </line>
-  );
-}

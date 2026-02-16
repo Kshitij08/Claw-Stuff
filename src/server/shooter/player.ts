@@ -15,6 +15,7 @@ import {
   ARENA_MAX_Z,
   MIN_SPAWN_SEPARATION,
   type WeaponType,
+  type PersonalityType,
 } from '../../shared/shooter-constants.js';
 import type { SpawnPoint } from './glb-loader.js';
 
@@ -31,6 +32,7 @@ export function createPlayer(
   name: string,
   spawn: SpawnPoint,
   strategyTag?: string,
+  options?: { personality?: PersonalityType; isAI?: boolean },
 ): ShooterPlayer {
   return {
     id,
@@ -49,6 +51,8 @@ export function createPlayer(
     alive: true,
     eliminated: false,
     character: BOT_CHARACTERS[characterIndex++ % BOT_CHARACTERS.length],
+    personality: options?.personality,
+    isAI: options?.isAI ?? false,
     aliveSince: Date.now(),
     survivalTime: 0,
     diedAt: null,
@@ -244,17 +248,49 @@ export function pickSpawnPoint(
   return bestSpawn;
 }
 
+/** Default floor Y, updated by engine from spawn point data. */
+let defaultFloorY = 0;
+
+/** Playable area bounds derived from spawn points (much tighter than arena bounds). */
+let playableMinX = ARENA_MIN_X;
+let playableMaxX = ARENA_MAX_X;
+let playableMinZ = ARENA_MIN_Z;
+let playableMaxZ = ARENA_MAX_Z;
+
+export function setDefaultFloorY(y: number): void {
+  defaultFloorY = y;
+}
+
+/**
+ * Set the playable area to the bounding box of GLB spawn points + margin.
+ * Random positions will be constrained to this area instead of the full arena.
+ */
+export function setPlayableBounds(spawnPoints: SpawnPoint[]): void {
+  if (spawnPoints.length === 0) return;
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const sp of spawnPoints) {
+    if (sp.x < minX) minX = sp.x;
+    if (sp.x > maxX) maxX = sp.x;
+    if (sp.z < minZ) minZ = sp.z;
+    if (sp.z > maxZ) maxZ = sp.z;
+  }
+  const margin = 3;
+  playableMinX = Math.max(ARENA_MIN_X, minX - margin);
+  playableMaxX = Math.min(ARENA_MAX_X, maxX + margin);
+  playableMinZ = Math.max(ARENA_MIN_Z, minZ - margin);
+  playableMaxZ = Math.min(ARENA_MAX_Z, maxZ + margin);
+}
+
 export function randomArenaPoint(): SpawnPoint {
-  const margin = 5;
   return {
-    x: ARENA_MIN_X + margin + Math.random() * (ARENA_MAX_X - ARENA_MIN_X - 2 * margin),
-    y: 0,
-    z: ARENA_MIN_Z + margin + Math.random() * (ARENA_MAX_Z - ARENA_MIN_Z - 2 * margin),
+    x: playableMinX + Math.random() * (playableMaxX - playableMinX),
+    y: defaultFloorY,
+    z: playableMinZ + Math.random() * (playableMaxZ - playableMinZ),
   };
 }
 
 /**
- * Try to find a random point in the arena that is in empty space (not inside/on map mesh).
+ * Try to find a random point in the playable area that is in empty space (not inside/on map mesh).
  * checkEmpty(x, y, z) should return true if a sphere at that point does not intersect the map.
  * Returns a point or null after maxAttempts.
  */
@@ -263,11 +299,10 @@ export function randomArenaPointInEmptySpace(
   radius: number,
   maxAttempts = 50,
 ): SpawnPoint | null {
-  const margin = 5;
   for (let i = 0; i < maxAttempts; i++) {
-    const x = ARENA_MIN_X + margin + Math.random() * (ARENA_MAX_X - ARENA_MIN_X - 2 * margin);
-    const z = ARENA_MIN_Z + margin + Math.random() * (ARENA_MAX_Z - ARENA_MIN_Z - 2 * margin);
-    const y = 0;
+    const x = playableMinX + Math.random() * (playableMaxX - playableMinX);
+    const z = playableMinZ + Math.random() * (playableMaxZ - playableMinZ);
+    const y = defaultFloorY;
     if (checkEmpty(x, y, z, radius)) return { x, y, z };
   }
   return null;

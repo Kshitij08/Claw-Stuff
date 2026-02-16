@@ -126,3 +126,67 @@ export const BULLET_RADIUS = 0.08;
 export const BULLET_SPEED = 85;       // units per second
 export const BULLET_MAX_AGE_MS = 2000; // remove if no hit
 export const BULLET_MASS = 0.01;      // very light so they don't push players
+
+// ── Bot AI ──────────────────────────────────────────────────────────
+export const BOT_NAMES = [
+  'Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo',
+  'Foxtrot', 'Ghost', 'Hawk', 'Iron', 'Jinx',
+] as const;
+
+export const PERSONALITIES = [
+  'Aggressive', 'Cautious', 'Sniper', 'Rusher', 'Tactician',
+] as const;
+export type PersonalityType = typeof PERSONALITIES[number];
+
+/**
+ * Personality modifiers that control bot behaviour.
+ *  detectRadius  – how far the bot "sees" enemies (metres)
+ *  preferredDist – ideal combat distance (positioning, not shooting)
+ *  speedMult     – movement speed multiplier
+ *  fleeHealth    – HP threshold below which the bot retreats (0 = never)
+ *  accuracy      – 0-1, tighter bullet spread for higher values
+ */
+export interface PersonalityMods {
+  detectRadius: number;
+  preferredDist: number;
+  speedMult: number;
+  fleeHealth: number;
+  accuracy: number;
+}
+
+export const PERSONALITY_MODS: Record<PersonalityType, PersonalityMods> = {
+  Aggressive: { detectRadius: 75, preferredDist: 5, speedMult: 1.25, fleeHealth: 0, accuracy: 0.82 },
+  Cautious:   { detectRadius: 75, preferredDist: 6, speedMult: 1.20, fleeHealth: 0, accuracy: 0.75 },
+  Sniper:     { detectRadius: 80, preferredDist: 10, speedMult: 1.15, fleeHealth: 0, accuracy: 0.92 },
+  Rusher:     { detectRadius: 70, preferredDist: 3, speedMult: 1.40, fleeHealth: 0, accuracy: 0.68 },
+  Tactician:  { detectRadius: 75, preferredDist: 6, speedMult: 1.20, fleeHealth: 0, accuracy: 0.80 },
+};
+
+/** Weapon tier for matchup evaluation (higher = stronger at range; knife=0). */
+export const WEAPON_TIER: Record<WeaponType, number> = {
+  [WEAPON_TYPES.KNIFE]: 0,
+  [WEAPON_TYPES.PISTOL]: 1,
+  [WEAPON_TYPES.SMG]: 2,
+  [WEAPON_TYPES.SHOTGUN]: 2.5,
+  [WEAPON_TYPES.ASSAULT_RIFLE]: 3,
+};
+
+// ── Bot AI tuning constants ─────────────────────────────────────────
+export const BOT_MELEE_RANGE = 3.0;
+export const BOT_KNIFE_RUSH_RADIUS = 15;
+export const BOT_OBSTACLE_LOOKAHEAD = 3;
+export const BOT_LOS_RAY_HEIGHT = 1.3;
+export const BOT_STUCK_CHECK_INTERVAL_MS = 300;
+export const BOT_STUCK_DISTANCE_THRESHOLD = 0.3;
+export const BOT_STUCK_TIME_THRESHOLD_MS = 800;
+export const BOT_STUCK_RECOVERY_DURATIONS = [500, 900, 1400];
+export const BOT_STALEMATE_CHECK_INTERVAL_MS = 500;
+export const BOT_STALEMATE_DIST_DELTA = 0.25;
+export const BOT_STALEMATE_TIME_THRESHOLD_MS = 3000;
+export const BOT_NO_LOS_STANDOFF_MS = 2000;
+export const BOT_NO_LOS_EXCLUDE_DURATION_MS = 2000;
+export const BOT_NO_LOS_PATH_PERSIST_MS = 500;
+export const BOT_STRAFE_CHANGE_INTERVAL_MS = 800;
+export const BOT_WANDER_CHANGE_MIN_MS = 800;
+export const BOT_WANDER_CHANGE_MAX_MS = 1500;
+export const BOT_LOW_AMMO_THRESHOLD = 3;

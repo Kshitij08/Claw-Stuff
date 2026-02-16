@@ -1,4 +1,4 @@
-import type { WeaponType } from './shooter-constants.js';
+import type { WeaponType, PersonalityType } from './shooter-constants.js';
 
 // ── Core entities ──────────────────────────────────────────────────
 
@@ -20,6 +20,10 @@ export interface ShooterPlayer {
   eliminated: boolean;    // all lives spent
   /** Character model id, e.g. "G_3" */
   character: string;
+  /** Bot personality (AI bots only). */
+  personality?: PersonalityType;
+  /** True if this is a server-side AI bot (not an API agent). */
+  isAI?: boolean;
   /** Timestamp when this life started (for survival time calc) */
   aliveSince: number;
   /** Accumulated survival seconds from previous lives */
@@ -177,6 +181,7 @@ export interface ShooterSpectatorPlayer {
   id: string;
   name: string;
   character: string;
+  personality?: string;
   x: number;
   y: number;
   z: number;
@@ -198,6 +203,7 @@ export interface ShooterSpectatorBullet {
   y: number;
   z: number;
   fromX: number;
+  fromY: number;
   fromZ: number;
   ownerId: string;
   weapon: WeaponType;

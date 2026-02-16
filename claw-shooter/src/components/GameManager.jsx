@@ -53,7 +53,7 @@ export function GameManagerProvider({ children }) {
 
     socket.on("shooterShot", (shot) => {
       const id = shotIdRef.current++;
-      setShots((prev) => [...prev.slice(-30), { ...shot, _id: id }]);
+      setShots((prev) => [...prev.slice(-12), { ...shot, _id: id }]);
     });
 
     socket.on("shooterHit", (hit) => {
@@ -80,12 +80,12 @@ export function GameManagerProvider({ children }) {
     };
   }, []);
 
-  // Clean up old shots/hits after a short time
+  // Clean up old shots/hits quickly so trails don't persist
   useEffect(() => {
     if (shots.length === 0) return;
     const timer = setTimeout(() => {
-      setShots((prev) => prev.slice(Math.max(0, prev.length - 10)));
-    }, 500);
+      setShots((prev) => prev.slice(Math.max(0, prev.length - 4)));
+    }, 200);
     return () => clearTimeout(timer);
   }, [shots.length]);
 

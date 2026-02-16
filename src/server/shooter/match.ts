@@ -3,13 +3,20 @@
  *
  * Mirrors the claw-snake MatchManager pattern:
  *  - Lobby opens immediately on start.
- *  - When the 2nd player joins, a 90s countdown begins.
+ *  - When the 2nd API agent joins (or immediately with AI bots), a countdown begins.
  *  - After countdown, match goes active for 4 minutes.
  *  - When ≤1 player has lives remaining (or time expires), match ends.
  *  - 10s results display, then next lobby opens.
+ *
+ * AI Bot Integration:
+ *  - On match start, empty slots are filled with server-side AI bots.
+ *  - When an API agent joins a full match, the lowest-priority AI bot is
+ *    removed to make room (API agents always get priority).
+ *  - AI bots use the same action pipeline as API agents.
  */
 
 import { ShooterEngine } from './engine.js';
+import { BotAIManager } from './bot-ai.js';
 import { getTotalSurvivalSeconds } from './player.js';
 import type {
   ShooterPlayer,
@@ -27,10 +34,19 @@ import {
   LOBBY_COUNTDOWN_MS,
   RESULTS_DURATION_MS,
   MAX_PLAYERS,
+  BOT_NAMES,
+  PERSONALITIES,
+  type PersonalityType,
 } from '../../shared/shooter-constants.js';
+
+/** Minimum number of total players (AI + API) to start a match. */
+const MIN_PLAYERS_FOR_MATCH = 2;
+/** Number of AI bots to fill in the arena. */
+const AI_FILL_COUNT = 5;
 
 export class ShooterMatchManager {
   private engine: ShooterEngine;
+  private botAI: BotAIManager;
   private registeredPlayers: Map<string, ShooterRegisteredPlayer> = new Map();
   private nextMatchId = 1;
   private lobbyCountdownTimer: NodeJS.Timeout | null = null;
@@ -47,6 +63,7 @@ export class ShooterMatchManager {
 
   constructor() {
     this.engine = new ShooterEngine();
+    this.botAI = new BotAIManager();
   }
 
   // ── Event registration ────────────────────────────────────────────
@@ -89,6 +106,14 @@ export class ShooterMatchManager {
       this.handleMatchEnd();
     });
 
+    // Wire bot AI pre-tick: runs before engine processes actions
+    this.engine.onPreTick(() => {
+      const match = this.engine.getMatch();
+      if (match) {
+        this.botAI.tick(match, this.engine);
+      }
+    });
+
     // Open initial lobby
     this.openLobby();
     console.log('[ShooterMatchManager] Started');
@@ -112,11 +137,85 @@ export class ShooterMatchManager {
     const matchId = `shooter_${this.nextMatchId++}`;
     this.engine.createMatch(matchId);
     this.registeredPlayers.clear();
+    this.botAI.clear();
     this.countdownStartsAt = 0;
 
-    console.log(`[ShooterMatchManager] Lobby open: ${matchId}`);
-    this.onLobbyOpenCallback?.(matchId, 0);
+    // Auto-fill with AI bots
+    this.fillWithAIBots();
+
+    // With AI bots in the arena, start countdown immediately
+    const match = this.engine.getMatch();
+    if (match && match.players.size >= MIN_PLAYERS_FOR_MATCH && !this.lobbyCountdownTimer) {
+      this.startLobbyCountdown();
+    }
+
+    console.log(`[ShooterMatchManager] Lobby open: ${matchId} (${this.botAI.size} AI bots)`);
+    this.onLobbyOpenCallback?.(matchId, this.countdownStartsAt);
     this.onStatusChangeCallback?.();
+  }
+
+  /** Fill empty slots with server-side AI bots up to AI_FILL_COUNT. */
+  private fillWithAIBots(): void {
+    const match = this.engine.getMatch();
+    if (!match) return;
+
+    const slotsToFill = Math.min(AI_FILL_COUNT, MAX_PLAYERS) - match.players.size;
+    let nameIndex = 0;
+
+    for (let i = 0; i < slotsToFill; i++) {
+      const botId = `ai_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+      const botName = BOT_NAMES[nameIndex % BOT_NAMES.length];
+      const personality = PERSONALITIES[i % PERSONALITIES.length] as PersonalityType;
+      nameIndex++;
+
+      const player = this.engine.addPlayer(botId, botName, undefined, { personality, isAI: true });
+      if (player) {
+        this.botAI.addBot(botId, personality);
+      }
+    }
+
+    console.log(`[ShooterMatchManager] Filled ${slotsToFill} AI bot slots`);
+  }
+
+  /**
+   * Remove one AI bot to make room for an API agent.
+   * Picks the AI bot with the fewest kills (least impactful removal).
+   * Returns the removed bot's playerId, or null if no AI bot found.
+   */
+  private removeOneAIBot(): string | null {
+    const match = this.engine.getMatch();
+    if (!match) return null;
+
+    const aiBotIds = this.botAI.getBotIds();
+    if (aiBotIds.length === 0) return null;
+
+    // Find the AI bot with lowest survival time, then lowest KDA (kills - deaths)
+    let bestId: string | null = null;
+    let bestSurvival = Infinity;
+    let bestKda = Infinity;
+
+    for (const botId of aiBotIds) {
+      const player = match.players.get(botId);
+      if (!player) continue;
+      const survival = getTotalSurvivalSeconds(player);
+      const kda = player.kills - player.deaths;
+      if (
+        survival < bestSurvival ||
+        (Math.abs(survival - bestSurvival) < 0.5 && kda < bestKda)
+      ) {
+        bestSurvival = survival;
+        bestKda = kda;
+        bestId = botId;
+      }
+    }
+
+    if (bestId) {
+      this.engine.removePlayer(bestId);
+      this.botAI.removeBot(bestId);
+      console.log(`[ShooterMatchManager] Removed AI bot ${bestId} to make room for API agent`);
+    }
+
+    return bestId;
   }
 
   // ── Join ──────────────────────────────────────────────────────────
@@ -146,10 +245,6 @@ export class ShooterMatchManager {
       }
     }
 
-    if (match.players.size >= MAX_PLAYERS) {
-      return { success: false, error: 'LOBBY_FULL', message: `Match lobby is full (${MAX_PLAYERS}/${MAX_PLAYERS} players)` };
-    }
-
     // Check if this agent already joined (by API key)
     for (const [, rp] of this.registeredPlayers) {
       if (rp.apiKey === apiKey) {
@@ -163,10 +258,18 @@ export class ShooterMatchManager {
       }
     }
 
+    // If arena is full, try to replace an AI bot
+    if (match.players.size >= MAX_PLAYERS) {
+      const removed = this.removeOneAIBot();
+      if (!removed) {
+        return { success: false, error: 'LOBBY_FULL', message: `Match lobby is full (${MAX_PLAYERS}/${MAX_PLAYERS} players, no AI bots to replace)` };
+      }
+    }
+
     const name = displayName || agentInfo.name;
     const playerId = `sp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
 
-    const player = this.engine.addPlayer(playerId, name, strategyTag);
+    const player = this.engine.addPlayer(playerId, name, strategyTag, { isAI: false });
     if (!player) {
       return { success: false, error: 'JOIN_FAILED', message: 'Failed to add player to match' };
     }
@@ -182,7 +285,7 @@ export class ShooterMatchManager {
     // If this is the 2nd player in lobby, start countdown
     if (
       (match.phase === 'lobby' || match.phase === 'countdown') &&
-      match.players.size >= 2 &&
+      match.players.size >= MIN_PLAYERS_FOR_MATCH &&
       !this.lobbyCountdownTimer
     ) {
       this.startLobbyCountdown();

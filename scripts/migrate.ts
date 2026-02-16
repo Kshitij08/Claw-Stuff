@@ -26,10 +26,16 @@ async function main() {
     // Matches table: one row per match
     await client.query(`
       CREATE TABLE IF NOT EXISTS matches (
-        id           TEXT PRIMARY KEY, -- e.g. "match_1"
+        id           TEXT PRIMARY KEY, -- e.g. "match_1" or "shooter_match_1"
         winner_name  TEXT,
         ended_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+    `);
+
+    // game_type: 'snake' | 'shooter' for per-game leaderboards and filtering
+    await client.query(`
+      ALTER TABLE matches
+        ADD COLUMN IF NOT EXISTS game_type TEXT NOT NULL DEFAULT 'snake';
     `);
 
     // Match players table: per-agent stats for each match

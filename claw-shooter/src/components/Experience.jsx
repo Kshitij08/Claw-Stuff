@@ -354,17 +354,19 @@ export const Experience = ({ downgradedPerformance = false }) => {
         });
       });
 
-      if (isHost()) {
-        for (let i = 0; i < PLAYER_COUNT; i++) {
-          if (botsAddedRef.current >= PLAYER_COUNT) break;
-          try {
-            await addBot();
-            botsAddedRef.current++;
-          } catch (e) {
-            console.warn("addBot", e);
-          }
-        }
-      }
+      // Claw Shooter is agent-only: no local Playroom bots. Server-driven agents join via API.
+      // Skipping addBot() so we don't show Bravo, Charlie, etc. on page load.
+      // if (isHost()) {
+      //   for (let i = 0; i < PLAYER_COUNT; i++) {
+      //     if (botsAddedRef.current >= PLAYER_COUNT) break;
+      //     try {
+      //       await addBot();
+      //       botsAddedRef.current++;
+      //     } catch (e) {
+      //       console.warn("addBot", e);
+      //     }
+      //   }
+      // }
     };
 
     start();

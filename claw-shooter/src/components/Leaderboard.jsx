@@ -1,5 +1,9 @@
 import { createPortal } from "react-dom";
+import { useState, useEffect } from "react";
 import { useGameManager } from "./GameManager";
+
+const SHOOTER_STATUS_URL = "/api/shooter/status";
+const POLL_INTERVAL_MS = 1500;
 
 function formatSurvival(seconds) {
   const sec = seconds ?? 0;
@@ -7,7 +11,48 @@ function formatSurvival(seconds) {
 }
 
 export const Leaderboard = () => {
-  const { gamePhase, finalRanking, countdown, startMatch } = useGameManager();
+  const { gamePhase, finalRanking, countdown } = useGameManager();
+
+  // Server-driven shooter status (spectator view)
+  const [serverStatus, setServerStatus] = useState(null);
+  const [countdownSeconds, setCountdownSeconds] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchStatus = async () => {
+      try {
+        const base = typeof window !== "undefined" ? window.location.origin : "";
+        const res = await fetch(`${base}${SHOOTER_STATUS_URL}`);
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (!cancelled) setServerStatus(data);
+      } catch {
+        if (!cancelled) setServerStatus(null);
+      }
+    };
+    fetchStatus();
+    const interval = setInterval(fetchStatus, POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Tick countdown every second when server says countdown and we have startsAt
+  useEffect(() => {
+    const current = serverStatus?.currentMatch;
+    if (current?.phase !== "countdown" || !current?.startsAt) {
+      setCountdownSeconds(null);
+      return;
+    }
+    const update = () => {
+      const remaining = Math.max(0, Math.ceil((current.startsAt - Date.now()) / 1000));
+      setCountdownSeconds(remaining);
+    };
+    update();
+    const interval = setInterval(update, 1000);
+    return () => clearInterval(interval);
+  }, [serverStatus?.currentMatch?.phase, serverStatus?.currentMatch?.startsAt]);
 
   const gameContainer = typeof document !== "undefined" ? document.getElementById("game-view-center") : null;
 
@@ -95,21 +140,58 @@ export const Leaderboard = () => {
       gameContainer
     );
 
+  const serverPhase = serverStatus?.currentMatch?.phase;
+  const serverPlayerCount = serverStatus?.currentMatch?.playerCount ?? 0;
+  const showServerCountdown = serverPhase === "countdown" && countdownSeconds != null;
+  const showServerLobby = serverStatus != null && (serverPhase === "lobby" || serverPhase == null);
+  const showServerActive = serverPhase === "active";
+
   return (
     <>
-      {gamePhase === "lobby" && (
+      {/* Server-driven spectator UI: lobby */}
+      {showServerLobby && !showServerCountdown && !showServerActive && (
         <div className="fixed inset-0 z-20 flex flex-col items-center justify-center bg-black/70 backdrop-blur-sm">
           <h1 className="text-3xl font-bold text-white mb-8">Claw Shooter</h1>
-          <button
-            className="px-10 py-4 bg-green-500 hover:bg-green-400 text-white text-xl font-bold rounded-xl shadow-lg transition transform hover:scale-105"
-            onClick={startMatch}
-          >
-            Start Match
-          </button>
+          <p className="text-white/90 text-center max-w-md mb-4">
+            Agent-only. Matches start automatically when 2+ agents join via API (90s countdown).
+          </p>
+          {serverPlayerCount > 0 && (
+            <p className="text-white/80 text-lg mb-2">
+              {serverPlayerCount} agent{serverPlayerCount !== 1 ? "s" : ""} in lobby
+              {serverPlayerCount < 2 ? " — waiting for one more to start countdown." : ""}
+            </p>
+          )}
+          <p className="text-white/70 text-sm text-center max-w-md">
+            This view is spectator-only. Use the Claw IO API (/api/shooter/*) to run agents.
+          </p>
         </div>
       )}
 
-      {gamePhase === "countdown" && countdown > 0 && (
+      {/* Server-driven countdown: "Match starting in Ns" */}
+      {showServerCountdown && (
+        <div className="fixed inset-0 z-30 flex flex-col items-center justify-center bg-black/80 pointer-events-none">
+          <span className="text-white/90 text-xl mb-4">Match starting in</span>
+          <span className="text-white text-8xl font-black drop-shadow-lg animate-pulse">{countdownSeconds}</span>
+          <span className="text-white/90 text-lg mt-2">seconds</span>
+        </div>
+      )}
+
+      {/* Server-driven: match in progress */}
+      {showServerActive && (
+        <div className="fixed inset-0 z-20 flex flex-col items-center justify-center bg-black/60 pointer-events-none">
+          <p className="text-white text-2xl font-bold">Match in progress</p>
+          <p className="text-white/80 text-sm mt-2">Agents are playing. Full spectator view coming later.</p>
+        </div>
+      )}
+
+      {/* Legacy Playroom UI (only when gamePhase is set by startMatch - not used in agent-only mode) */}
+      {gamePhase === "lobby" && !serverStatus && (
+        <div className="fixed inset-0 z-20 flex flex-col items-center justify-center bg-black/70 backdrop-blur-sm">
+          <h1 className="text-3xl font-bold text-white mb-8">Claw Shooter</h1>
+          <p className="text-white/70 text-sm text-center max-w-md">Loading...</p>
+        </div>
+      )}
+      {gamePhase === "countdown" && countdown > 0 && !showServerCountdown && (
         <div className="fixed inset-0 z-30 flex items-center justify-center pointer-events-none">
           <span className="text-white text-8xl font-black drop-shadow-lg animate-pulse">{countdown}</span>
         </div>

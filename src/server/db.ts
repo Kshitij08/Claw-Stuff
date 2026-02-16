@@ -43,15 +43,35 @@ export async function getHighestMatchId(): Promise<number> {
   }
 }
 
-export async function ensureMatchExists(matchId: string) {
+/** Next shooter match id: shooter_match_1, shooter_match_2, ... */
+export async function getHighestShooterMatchId(): Promise<number> {
+  try {
+    const rows = await dbQuery<{ max_id: string }>(
+      `
+      SELECT COALESCE(MAX(CAST(SUBSTRING(id FROM 'shooter_match_(\\d+)') AS INTEGER)), 0) AS max_id
+      FROM matches
+      WHERE id LIKE 'shooter_match_%';
+    `,
+    );
+    if (rows.length > 0 && rows[0].max_id) {
+      return parseInt(rows[0].max_id, 10);
+    }
+    return 0;
+  } catch (err) {
+    console.error('[db] getHighestShooterMatchId failed:', err);
+    return 0;
+  }
+}
+
+export async function ensureMatchExists(matchId: string, gameType: 'snake' | 'shooter' = 'snake') {
   try {
     await dbQuery(
       `
-      INSERT INTO matches (id, winner_name)
-      VALUES ($1, NULL)
-      ON CONFLICT (id) DO NOTHING;
+      INSERT INTO matches (id, winner_name, game_type)
+      VALUES ($1, NULL, $2)
+      ON CONFLICT (id) DO UPDATE SET game_type = COALESCE(EXCLUDED.game_type, matches.game_type);
     `,
-      [matchId],
+      [matchId, gameType],
     );
   } catch (err) {
     console.error('[db] ensureMatchExists failed:', err);
@@ -66,10 +86,11 @@ export async function recordAgentJoin(opts: {
   color?: string;
   skinId?: string;
   strategyTag?: string;
+  gameType?: 'snake' | 'shooter';
 }) {
   try {
     // Ensure the match exists in the database before inserting into match_players
-    await ensureMatchExists(opts.matchId);
+    await ensureMatchExists(opts.matchId, opts.gameType ?? 'snake');
 
     await dbQuery(
       `
@@ -106,20 +127,23 @@ export async function recordMatchEnd(opts: {
   endedAt: number;
   /** Use agent_name (canonical) so match_players rows are updated correctly. */
   finalScores: { agentName: string; score: number; kills: number }[];
+  /** Optional: snake | shooter for matches table game_type. */
+  gameType?: 'snake' | 'shooter';
 }) {
   try {
     // Ensure the match row exists before recording the final result
-    await ensureMatchExists(opts.matchId);
+    await ensureMatchExists(opts.matchId, opts.gameType ?? 'snake');
 
     await dbQuery(
       `
-      INSERT INTO matches (id, winner_name, ended_at)
-      VALUES ($1, $2, to_timestamp($3 / 1000.0))
+      INSERT INTO matches (id, winner_name, ended_at, game_type)
+      VALUES ($1, $2, to_timestamp($3 / 1000.0), $4)
       ON CONFLICT (id) DO UPDATE
       SET winner_name = EXCLUDED.winner_name,
-          ended_at    = EXCLUDED.ended_at;
+          ended_at    = EXCLUDED.ended_at,
+          game_type   = COALESCE(EXCLUDED.game_type, matches.game_type);
     `,
-      [opts.matchId, opts.winnerAgentName, opts.endedAt],
+      [opts.matchId, opts.winnerAgentName, opts.endedAt, opts.gameType ?? 'snake'],
     );
 
     for (const row of opts.finalScores) {
@@ -147,7 +171,7 @@ export type GlobalLeaderboardRow = {
   strategyTag?: string | null;
 };
 
-export async function getGlobalLeaderboard(): Promise<{
+export async function getGlobalLeaderboard(opts?: { game?: 'snake' | 'shooter' }): Promise<{
   totalBots: number;
   totalGames: number;
   leaderboard: GlobalLeaderboardRow[];
@@ -157,14 +181,23 @@ export async function getGlobalLeaderboard(): Promise<{
     return { totalBots: 0, totalGames: 0, leaderboard: [] };
   }
 
+  const gameFilter = opts?.game;
+  const params = gameFilter ? [gameFilter] : [];
+
   try {
     const totalBotsRows = await dbQuery<{ count: string }>(
-      `SELECT COUNT(*)::text AS count FROM agents;`,
+      gameFilter
+        ? `SELECT COUNT(DISTINCT mp.agent_name)::text AS count FROM match_players mp JOIN matches m ON m.id = mp.match_id WHERE m.game_type = $1`
+        : `SELECT COUNT(*)::text AS count FROM agents`,
+      gameFilter ? [gameFilter] : [],
     );
     const totalBots = totalBotsRows.length ? parseInt(totalBotsRows[0].count, 10) : 0;
 
     const totalGamesRows = await dbQuery<{ count: string }>(
-      `SELECT COUNT(*)::text AS count FROM matches;`,
+      gameFilter
+        ? `SELECT COUNT(*)::text AS count FROM matches WHERE game_type = $1`
+        : `SELECT COUNT(*)::text AS count FROM matches`,
+      gameFilter ? [gameFilter] : [],
     );
     const totalGames = totalGamesRows.length ? parseInt(totalGamesRows[0].count, 10) : 0;
 
@@ -185,10 +218,11 @@ export async function getGlobalLeaderboard(): Promise<{
           COALESCE(SUM(CASE WHEN m.winner_name = mp.agent_name THEN 1 ELSE 0 END), 0)::text AS wins,
           MAX(mp.strategy_tag) AS strategy_tag
         FROM match_players mp
-        JOIN matches m ON m.id = mp.match_id
+        JOIN matches m ON m.id = mp.match_id${gameFilter ? ' AND m.game_type = $1' : ''}
         GROUP BY mp.agent_name
         HAVING COUNT(DISTINCT mp.match_id) > 0;
       `,
+        params,
       );
 
       leaderboard = rowsWithTag.map((row) => {
@@ -217,10 +251,11 @@ export async function getGlobalLeaderboard(): Promise<{
           COUNT(DISTINCT mp.match_id)::text AS matches_played,
           COALESCE(SUM(CASE WHEN m.winner_name = mp.agent_name THEN 1 ELSE 0 END), 0)::text AS wins
         FROM match_players mp
-        JOIN matches m ON m.id = mp.match_id
+        JOIN matches m ON m.id = mp.match_id${gameFilter ? ' AND m.game_type = $1' : ''}
         GROUP BY mp.agent_name
         HAVING COUNT(DISTINCT mp.match_id) > 0;
       `,
+        params,
       );
 
       leaderboard = rowsLegacy.map((row) => {

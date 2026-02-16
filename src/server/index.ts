@@ -7,7 +7,9 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
 import { MatchManager } from './game/match.js';
+import { ShooterMatchManager } from './shooter/match.js';
 import { createRoutes } from './api/routes.js';
+import { createShooterRoutes } from './shooter/routes.js';
 import { createBettingRoutes } from './betting/routes.js';
 import { createNftRoutes } from './nft/routes.js';
 import { setEmitter } from './betting/service.js';
@@ -92,11 +94,13 @@ app.get('/skill.md', (req, res) => {
 // Serve static files (spectator frontend)
 app.use(express.static(join(__dirname, '../../public')));
 
-// Initialize match manager
+// Initialize match managers
 const matchManager = new MatchManager();
+const shooterMatchManager = new ShooterMatchManager();
 
 // API routes
 app.use('/api', createRoutes(matchManager));
+app.use('/api/shooter', createShooterRoutes(shooterMatchManager));
 app.use('/api/betting', createBettingRoutes());
 app.use('/api', createNftRoutes());
 
@@ -215,9 +219,12 @@ httpServer.listen(PORT, () => {
 ╚══════════════════════════════════════════════════════════════╝
   `);
 
-  // Start the match scheduler (async initialization)
+  // Start the match schedulers (async initialization)
   matchManager.start().catch((err) => {
     console.error('Failed to start match manager:', err);
+  });
+  shooterMatchManager.start().catch((err) => {
+    console.error('Failed to start shooter match manager:', err);
   });
 });
 
@@ -225,6 +232,7 @@ httpServer.listen(PORT, () => {
 process.on('SIGINT', () => {
   console.log('\nShutting down...');
   matchManager.stop();
+  shooterMatchManager.stop();
   httpServer.close(() => {
     console.log('Server closed');
     process.exit(0);

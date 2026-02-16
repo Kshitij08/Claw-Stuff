@@ -128,3 +128,21 @@ export const WEAPON_LABELS = {
 
 /** Delay (ms) before a new set of weapon pickups spawns after all are taken */
 export const WEAPON_RESPAWN_DELAY = 5000;
+
+/** Weapon tier for matchup evaluation (higher = stronger at range; knife=0) */
+export const WEAPON_TIER = {
+  [WEAPON_TYPES.KNIFE]: 0,
+  [WEAPON_TYPES.PISTOL]: 1,
+  [WEAPON_TYPES.SMG]: 2,
+  [WEAPON_TYPES.SHOTGUN]: 2.5,
+  [WEAPON_TYPES.ASSAULT_RIFLE]: 3,
+};
+
+/** Personality strategy: all bots are kill-hungry; differences are in HOW they kill, not WHETHER */
+export const PERSONALITY_STRATEGY = {
+  Aggressive: { fleeFromArmedWhenKnife: false, knifeAggression: 1.0 },
+  Cautious:   { fleeFromArmedWhenKnife: false, knifeAggression: 0.85 },
+  Sniper:     { fleeFromArmedWhenKnife: false, knifeAggression: 0.7 },
+  Rusher:     { fleeFromArmedWhenKnife: false, knifeAggression: 1.0 },
+  Tactician:  { fleeFromArmedWhenKnife: false, knifeAggression: 0.9 },
+};

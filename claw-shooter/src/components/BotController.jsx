@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CharacterPlayer } from "./CharacterPlayer";
-import { CapsuleCollider, RigidBody, vec3 } from "@react-three/rapier";
+import { CapsuleCollider, RigidBody, vec3, useRapier } from "@react-three/rapier";
 import { useFrame, useThree } from "@react-three/fiber";
 import { isHost, Bot, usePlayersList } from "playroomkit";
 import { Billboard, Text } from "@react-three/drei";
@@ -12,14 +12,27 @@ import {
   HEALTH_PER_LIFE,
   MAP_BOUNDS,
   PLAYER_COUNT,
+  WEAPON_TIER,
+  PERSONALITY_STRATEGY,
 } from "../constants/weapons";
 import { useGameManager } from "./GameManager";
 
+/* ── Obstacle / raycast constants ───────────────────────────────── */
+const OBSTACLE_LOOKAHEAD = 3;
+const RAY_ORIGIN_Y = 1.3;
+const LOS_THRESHOLD = 0.98;
+const STALEMATE_CHECK_INTERVAL = 300;
+const STALEMATE_DIST_DELTA = 0.35;
+const STALEMATE_TIME_THRESHOLD = 500;
+const TARGET_PERSISTENCE_MS = 0;
+const STUCK_RECOVERY_DURATIONS = [500, 900, 1400];
+const RECOVERY_QUADRANT_AVOID_MS = 1500;
+
 /* ── Tuning constants ──────────────────────────────────────────── */
-const BASE_MOVEMENT_SPEED = 200;
-const MELEE_RANGE = 1.8;
-const KNIFE_RUSH_DECISION_RADIUS = 14;
-const RESPAWN_DELAY = 3000;
+const BASE_MOVEMENT_SPEED = 260;
+const MELEE_RANGE = 2.0;
+const KNIFE_RUSH_DECISION_RADIUS = 30;
+const RESPAWN_DELAY = 2000;
 const OCCUPIED_RADIUS = 3;
 /** Min distance (m) from death position when choosing respawn so we never respawn on the spot */
 const MIN_RESPAWN_DISTANCE = 8;
@@ -33,10 +46,123 @@ const STUCK_TIME_THRESHOLD = 800; // ms stuck before recovery kicks in
 const STUCK_RECOVERY_DURATION = 600; // ms to move in recovery direction
 
 // Timing
-const STRAFE_CHANGE_INTERVAL = 1200;
-const WANDER_CHANGE_MIN = 1500;
-const WANDER_CHANGE_MAX = 3000;
-const LOW_AMMO_THRESHOLD = 5;
+const STRAFE_CHANGE_INTERVAL = 800;
+const WANDER_CHANGE_MIN = 800;
+const WANDER_CHANGE_MAX = 1500;
+const LOW_AMMO_THRESHOLD = 3;
+
+/* ── Raycast helpers: World.castRay(ray, maxToi, solid, filterPredicate?) ── */
+function castRay(world, rapier, origin, angle, maxDist, excludeRigidBodyHandle = null) {
+  if (!world || !rapier) return null;
+  const dir = { x: Math.sin(angle), y: 0, z: Math.cos(angle) };
+  const ray = new rapier.Ray(origin, dir);
+  const filter = excludeRigidBodyHandle != null
+    ? (collider) => (collider.parent()?.handle ?? -1) !== excludeRigidBodyHandle
+    : undefined;
+  return world.castRay(ray, maxDist, true, filter);
+}
+
+function hasLineOfSight(world, rapier, fromPos, toPos, excludeRigidBodyHandle = null) {
+  if (!world || !rapier) return false;
+  const dx = toPos.x - fromPos.x;
+  const dz = toPos.z - fromPos.z;
+  const len = Math.sqrt(dx * dx + dz * dz);
+  if (len < 0.01) return true;
+  const origin = { x: fromPos.x, y: RAY_ORIGIN_Y, z: fromPos.z };
+  const dir = { x: dx / len, y: 0, z: dz / len };
+  const ray = new rapier.Ray(origin, dir);
+  const filter = excludeRigidBodyHandle != null
+    ? (collider) => (collider.parent()?.handle ?? -1) !== excludeRigidBodyHandle
+    : undefined;
+  const hit = world.castRay(ray, len, true, filter);
+  if (!hit) return true;
+  return hit.toi >= len * LOS_THRESHOLD;
+}
+
+/** Try desiredAngle first, then offsets ±30°, ±60°, ±90°; return angle with longest clear distance. */
+function findClearDirection(world, rapier, origin, desiredAngle, lookahead, excludeRigidBodyHandle = null) {
+  if (!world || !rapier) return desiredAngle;
+  const offsets = [0, Math.PI / 6, -Math.PI / 6, Math.PI / 3, -Math.PI / 3, Math.PI / 2, -Math.PI / 2];
+  let bestAngle = desiredAngle;
+  let bestToi = 0;
+  for (const off of offsets) {
+    const angle = desiredAngle + off;
+    const hit = castRay(world, rapier, origin, angle, lookahead, excludeRigidBodyHandle);
+    const toi = hit ? hit.toi : lookahead;
+    if (toi > bestToi) {
+      bestToi = toi;
+      bestAngle = angle;
+    }
+  }
+  return bestAngle;
+}
+
+/** Eight directions every 45°; return angle with longest clear distance, preferring toward targetAngle. */
+function findLongestClearDirection(world, rapier, origin, targetAngle, maxDist, excludeRigidBodyHandle = null) {
+  if (!world || !rapier) return targetAngle;
+  const candidates = [];
+  for (let i = 0; i < 8; i++) {
+    const angle = (i / 8) * Math.PI * 2;
+    const hit = castRay(world, rapier, origin, angle, maxDist, excludeRigidBodyHandle);
+    const toi = hit ? hit.toi : maxDist;
+    let diff = angle - targetAngle;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    candidates.push({ angle, toi, diff: Math.abs(diff) });
+  }
+  candidates.sort((a, b) => {
+    if (Math.abs(b.toi - a.toi) < 0.1) return a.diff - b.diff;
+    return b.toi - a.toi;
+  });
+  return candidates[0].angle;
+}
+
+/** Advantage score: positive = favorable fight. Uses health, weapon tier, lives, ammo, distance. */
+function evaluateMatchup(myState, enemyEntry, myPos) {
+  const myHealth = myState.health ?? 100;
+  const myLives = myState.lives ?? LIVES_PER_BOT;
+  const myWeapon = myState.weapon ?? WEAPON_TYPES.KNIFE;
+  const myAmmo = myState.ammo ?? 0;
+  const enemyHealth = enemyEntry.health ?? 100;
+  const enemyLives = enemyEntry.player?.state?.lives ?? LIVES_PER_BOT;
+  const enemyWeapon = enemyEntry.weapon ?? WEAPON_TYPES.KNIFE;
+  const dist = enemyEntry.distance ?? 0;
+
+  let score = 0;
+  score += (myHealth - enemyHealth) / 150;
+  score += (myLives - enemyLives) * 0.1;
+  const myTier = WEAPON_TIER[myWeapon] ?? 0;
+  const enemyTier = WEAPON_TIER[enemyWeapon] ?? 0;
+  score += (myTier - enemyTier) * 0.15;
+  if (myWeapon !== WEAPON_TYPES.KNIFE && (myAmmo == null || myAmmo < 3)) score -= 0.15;
+  if (myWeapon === WEAPON_TYPES.KNIFE && enemyWeapon === WEAPON_TYPES.KNIFE) score += 0.4;
+  if (myWeapon === WEAPON_TYPES.KNIFE && enemyWeapon === WEAPON_TYPES.KNIFE && dist < 8) score += 0.3;
+  if (dist < 4 && myWeapon === WEAPON_TYPES.KNIFE) score += 0.2;
+  return score;
+}
+
+/**
+ * Pick target: zero hesitation. Nearest or weakest (when healthy).
+ * excludeId: when in stalemate with current target, switch to another bot (better odds).
+ */
+function selectTarget(allEnemies, myHealth, excludeId = null) {
+  let list = allEnemies;
+  if (excludeId && list.length > 1) {
+    list = list.filter((e) => e.id !== excludeId);
+  }
+  if (!list.length) return null;
+  const preferWeak = myHealth > 40;
+  if (preferWeak) {
+    const sorted = [...list].sort((a, b) => {
+      const healthA = a.health ?? 100;
+      const healthB = b.health ?? 100;
+      if (healthA !== healthB) return healthA - healthB;
+      return a.distance - b.distance;
+    });
+    return sorted[0];
+  }
+  return list[0];
+}
 
 /* ── Personality definitions ───────────────────────────────────── *
  *  detectRadius  – how far the bot "sees" enemies
@@ -47,38 +173,38 @@ const LOW_AMMO_THRESHOLD = 5;
  */
 const PERSONALITY_MODS = {
   Aggressive: {
-    detectRadius: 16,
-    preferredDist: 6,
-    speedMult: 1.15,
-    fleeHealth: 15,
-    accuracy: 0.85,
+    detectRadius: 32,
+    preferredDist: 5,
+    speedMult: 1.25,
+    fleeHealth: 0,
+    accuracy: 0.82,
   },
   Cautious: {
-    detectRadius: 14,
-    preferredDist: 12,
-    speedMult: 0.9,
-    fleeHealth: 55,
-    accuracy: 0.7,
+    detectRadius: 32,
+    preferredDist: 6,
+    speedMult: 1.2,
+    fleeHealth: 0,
+    accuracy: 0.75,
   },
   Sniper: {
-    detectRadius: 20,
-    preferredDist: 15,
-    speedMult: 0.95,
-    fleeHealth: 40,
+    detectRadius: 36,
+    preferredDist: 10,
+    speedMult: 1.15,
+    fleeHealth: 0,
     accuracy: 0.92,
   },
   Rusher: {
-    detectRadius: 12,
-    preferredDist: 4,
-    speedMult: 1.35,
-    fleeHealth: 25,
-    accuracy: 0.65,
+    detectRadius: 30,
+    preferredDist: 3,
+    speedMult: 1.4,
+    fleeHealth: 0,
+    accuracy: 0.68,
   },
   Tactician: {
-    detectRadius: 15,
-    preferredDist: 9,
-    speedMult: 1.0,
-    fleeHealth: 35,
+    detectRadius: 32,
+    preferredDist: 6,
+    speedMult: 1.2,
+    fleeHealth: 0,
     accuracy: 0.8,
   },
 };
@@ -121,6 +247,34 @@ export class PlayerBot extends Bot {
     return all.length
       ? all[0]
       : { player: null, distance: Infinity, angle: 0 };
+  }
+
+  /**
+   * Broadcast view of all enemies: location, weapon, health, lives.
+   * Uses shared Playroom state so every bot has full visibility of others.
+   * Returns array of { id, pos, weapon, health, lives, distance, angle, player } sorted by distance.
+   */
+  getBroadcastEnemyStates(players, myId, myPos) {
+    if (!myPos || !players?.length) return [];
+    const out = [];
+    for (const p of players) {
+      if (p.id === myId || !p.state?.pos) continue;
+      if (p.state.eliminated || p.state.dead || (p.state.lives != null && p.state.lives <= 0)) continue;
+      const pos = p.state.pos;
+      const distance = vec3(myPos).distanceTo(vec3(pos));
+      out.push({
+        id: p.id,
+        pos,
+        weapon: p.state.weapon ?? WEAPON_TYPES.KNIFE,
+        health: p.state.health ?? 100,
+        lives: p.state.lives ?? LIVES_PER_BOT,
+        distance,
+        angle: -Math.atan2(pos.z - myPos.z, pos.x - myPos.x) + Math.PI / 2,
+        player: p,
+      });
+    }
+    out.sort((a, b) => a.distance - b.distance);
+    return out;
   }
 
   /** All available (not-taken) pickups sorted closest-first */
@@ -190,6 +344,7 @@ export const BotController = ({
   const [bodyKey, setBodyKey] = useState(0);
   const scene = useThree((s) => s.scene);
   const bot = state.bot;
+  const { world, rapier } = useRapier();
 
   /* Wander */
   const wanderAngleRef = useRef(Math.random() * Math.PI * 2);
@@ -199,12 +354,20 @@ export const BotController = ({
   const strafeDirRef = useRef(Math.random() > 0.5 ? 1 : -1);
   const strafeChangeTimeRef = useRef(0);
 
-  /* Stuck detection */
+  /* Stuck detection & recovery */
   const lastStuckCheckRef = useRef(0);
   const lastStuckPosRef = useRef(null);
   const stuckAccumRef = useRef(0);
+  const stuckConsecutiveCountRef = useRef(0);
   const recoveryRef = useRef({ active: false, angle: 0, until: 0 });
   const lastMoveAngleRef = useRef(0);
+  const lastRecoveryTimeRef = useRef(0);
+  const recoveryQuadrantRef = useRef(0);
+
+  /* Stalemate / engagement */
+  const engagementRef = useRef({ targetId: null, startTime: 0, lastDist: Infinity, lastCheckTime: 0 });
+  const targetPersistRef = useRef({ id: null, until: 0 });
+  const flankWaypointRef = useRef(null);
 
   /* Ref so setTimeout always uses the latest spawn function */
   const spawnFnRef = useRef(null);
@@ -424,10 +587,14 @@ export const BotController = ({
       state.setState("ammo", null);
       state.setState("aliveSince", Date.now());
 
-      /* Reset stuck detection on respawn */
+      /* Reset stuck detection and engagement on respawn */
       stuckAccumRef.current = 0;
+      stuckConsecutiveCountRef.current = 0;
       recoveryRef.current = { active: false, angle: 0, until: 0 };
       lastStuckPosRef.current = null;
+      engagementRef.current = { targetId: null, startTime: 0, lastDist: Infinity, lastCheckTime: 0 };
+      targetPersistRef.current = { id: null, until: 0 };
+      flankWaypointRef.current = null;
     }, RESPAWN_DELAY);
 
     return () => clearTimeout(timer);
@@ -478,13 +645,46 @@ export const BotController = ({
     const recentlyHurt = Date.now() - lastDamageTime < 1200;
     const now = Date.now();
 
-    /* ── World awareness (broadcast data from all bots & pickups) ── */
-    const allEnemies = bot.getAllEnemies(players, state.id, myPos);
-    const nearest = allEnemies[0] || null;
+    /* ── World awareness: broadcast enemy states ── */
+    const allEnemies = bot.getBroadcastEnemyStates(players, state.id, myPos);
     const allPickups = bot.getAllPickups(weaponPickups, myPos);
     const nearestPickup = allPickups[0] || null;
+    const myHealth = state.state.health ?? 100;
+    const excludeHandle = rigidbody.current?.raw?.() ?? rigidbody.current;
+    const myRigidBodyHandle = excludeHandle?.handle ?? null;
+    const rayOrigin = { x: myPos.x, y: RAY_ORIGIN_Y, z: myPos.z };
 
-    /* ── Stuck detection ── */
+    /* First pick: current target (no persistence = re-evaluate every frame) */
+    let nearest = selectTarget(allEnemies, myHealth, null);
+    const hasLOSToTarget = nearest && world && rapier && hasLineOfSight(world, rapier, myPos, nearest.pos, myRigidBodyHandle);
+
+    /* Stalemate: distance not changing or obstacle between us → switch to another bot for better odds */
+    let switchTargetId = null;
+    if (nearest?.id) {
+      const eng = engagementRef.current;
+      if (eng.targetId !== nearest.id) {
+        engagementRef.current = { targetId: nearest.id, startTime: now, lastDist: nearest.distance, lastCheckTime: now };
+      } else if (now - eng.lastCheckTime > STALEMATE_CHECK_INTERVAL) {
+        engagementRef.current.lastCheckTime = now;
+        const distDelta = Math.abs(nearest.distance - eng.lastDist);
+        engagementRef.current.lastDist = nearest.distance;
+        const timeEngaged = now - eng.startTime;
+        const stuckStandoff = distDelta < STALEMATE_DIST_DELTA && timeEngaged > STALEMATE_TIME_THRESHOLD;
+        const noLOSStandoff = !hasLOSToTarget && timeEngaged > 350;
+        if (stuckStandoff || noLOSStandoff) {
+          switchTargetId = nearest.id;
+          engagementRef.current.startTime = now;
+        }
+      }
+    } else {
+      engagementRef.current.targetId = null;
+    }
+
+    if (switchTargetId && allEnemies.length > 1) {
+      nearest = selectTarget(allEnemies, myHealth, switchTargetId);
+    }
+
+    /* ── Stuck detection & raycast-based recovery ── */
     if (now - lastStuckCheckRef.current > STUCK_CHECK_INTERVAL) {
       lastStuckCheckRef.current = now;
       if (lastStuckPosRef.current) {
@@ -498,25 +698,31 @@ export const BotController = ({
       }
       lastStuckPosRef.current = { x: myPos.x, y: myPos.y, z: myPos.z };
 
-      /* Activate recovery when stuck long enough */
       if (
         stuckAccumRef.current >= STUCK_TIME_THRESHOLD &&
         !recoveryRef.current.active
       ) {
+        stuckConsecutiveCountRef.current = Math.min(2, stuckConsecutiveCountRef.current + 1);
+        const durationIndex = Math.min(stuckConsecutiveCountRef.current, STUCK_RECOVERY_DURATIONS.length - 1);
+        const duration = STUCK_RECOVERY_DURATIONS[durationIndex];
         const base = lastMoveAngleRef.current;
-        const dir = Math.random() > 0.5 ? 1 : -1;
-        recoveryRef.current = {
-          active: true,
-          angle:
-            base + (Math.PI / 2 + (Math.random() - 0.5) * 0.8) * dir,
-          until: now + STUCK_RECOVERY_DURATION,
-        };
+        let preferredAngle = base;
+        if (nearest && world && rapier) {
+          const side = (recoveryQuadrantRef.current % 2 === 0) ? 1 : -1;
+          preferredAngle = nearest.angle + (Math.PI / 2) * side;
+          recoveryQuadrantRef.current += 1;
+        }
+        const recoveryAngle = findLongestClearDirection(world, rapier, rayOrigin, preferredAngle, OBSTACLE_LOOKAHEAD * 2.5, myRigidBodyHandle);
+        lastRecoveryTimeRef.current = now;
+        recoveryRef.current = { active: true, angle: recoveryAngle, until: now + duration };
         stuckAccumRef.current = 0;
       }
     }
-
     if (recoveryRef.current.active && now > recoveryRef.current.until) {
       recoveryRef.current.active = false;
+    }
+    if (vec3(myPos).distanceTo(vec3(lastStuckPosRef.current)) >= STUCK_DISTANCE_THRESHOLD) {
+      stuckConsecutiveCountRef.current = 0;
     }
 
     /* ── Wander angle (changes every 1.5–3 s) ── */
@@ -542,22 +748,18 @@ export const BotController = ({
     const enemyDetected = nearest && nearest.distance < detectRadius;
     const pickupAvailable = !!nearestPickup;
 
-    /* ═══════════════════ DECISION TREE ═══════════════════ */
+    /* ═══════════════════ RELENTLESS ATTACK: zero hesitation, no caution ═══════════════════ */
 
     if (hasGun && enemyDetected) {
-      /* ── GUN COMBAT: shoot as soon as enemy is in detection range ── */
       lookAngle = nearest.angle;
-
-      /* Fire weapon */
-      if (weaponStats && !weaponStats.isMelee && ammo > 0) {
+      if (weaponStats && !weaponStats.isMelee && ammo > 0 && hasLOSToTarget) {
         if (now - lastShoot.current > weaponStats.fireRate) {
           lastShoot.current = now;
           const spread = weaponStats.spread ?? 0.02;
           const pellets = weaponStats.pellets ?? 1;
           const effSpread = spread * (2 - accuracy);
           for (let i = 0; i < pellets; i++) {
-            const a =
-              nearest.angle + (Math.random() - 0.5) * effSpread * 2;
+            const a = nearest.angle + (Math.random() - 0.5) * effSpread * 2;
             onFire({
               id: `${state.id}-${now}-${i}-${Math.random()}`,
               position: vec3(myPos),
@@ -570,101 +772,61 @@ export const BotController = ({
           state.setState("ammo", ammo);
         }
       }
+      moveAngle = nearest.distance > preferredDist * 0.9
+        ? nearest.angle
+        : nearest.angle + (Math.PI / 2.5) * strafeDirRef.current;
+      stateLabel = hasLOSToTarget ? "Idle_Shoot" : "Run";
 
-      /* Movement during gun combat */
-      if (health <= fleeHealth || (recentlyHurt && health < fleeHealth * 1.5)) {
-        /* FLEE – bias toward nearest pickup if roughly in flee direction */
-        let fleeAngle = bot.getMoveAngleAwayFrom(nearest.pos, myPos);
-        if (nearestPickup) {
-          const pAngle = nearestPickup.angle;
-          let diff = pAngle - fleeAngle;
-          while (diff > Math.PI) diff -= Math.PI * 2;
-          while (diff < -Math.PI) diff += Math.PI * 2;
-          if (Math.abs(diff) < Math.PI / 3) {
-            fleeAngle = fleeAngle * 0.6 + pAngle * 0.4;
-          }
-        }
-        moveAngle = fleeAngle + (Math.random() - 0.5) * 0.5;
-        stateLabel = "Run";
-      } else if (nearest.distance < preferredDist * 0.5) {
-        /* Too close – back off while strafing */
-        const away = bot.getMoveAngleAwayFrom(nearest.pos, myPos);
-        moveAngle = away + strafeDirRef.current * 0.4;
-        stateLabel = "Run";
-      } else if (nearest.distance > preferredDist * 1.3) {
-        /* Too far – close in */
-        moveAngle = nearest.angle;
-        stateLabel = "Run";
-      } else {
-        /* Sweet spot – circle strafe */
-        moveAngle =
-          nearest.angle + (Math.PI / 2) * strafeDirRef.current;
-        stateLabel = "Idle_Shoot";
-      }
     } else if (!hasGun && enemyDetected) {
-      /* ── KNIFE COMBAT / SEEK WEAPON ── */
-      const pickupDist = nearestPickup ? nearestPickup.distance : Infinity;
-
-      if (nearestPickup && pickupDist < nearest.distance * 0.8) {
-        /* Pickup is closer than enemy → grab weapon first */
-        moveAngle = nearestPickup.angle;
-        lookAngle = nearestPickup.angle;
-        stateLabel = "Run";
-      } else if (nearest.distance <= MELEE_RANGE) {
-        /* In melee range → slash */
+      if (nearest.distance <= MELEE_RANGE) {
         lookAngle = nearest.angle;
         if (now - lastMelee.current > KNIFE.fireRate) {
           lastMelee.current = now;
           onMeleeHit?.(nearest.player.id, state.id, KNIFE.damage);
         }
         stateLabel = "Idle_Shoot";
-      } else if (nearest.distance < KNIFE_RUSH_DECISION_RADIUS) {
-        /* Rush with knife */
-        moveAngle = nearest.angle;
-        lookAngle = nearest.angle;
-        stateLabel = "Run";
-      } else if (nearestPickup) {
-        /* Enemy far – go get a weapon instead */
+      } else if (nearestPickup && nearestPickup.distance < 3 && nearest.distance > 12) {
         moveAngle = nearestPickup.angle;
         lookAngle = nearestPickup.angle;
         stateLabel = "Run";
       } else {
-        /* No pickup available, close in with knife */
         moveAngle = nearest.angle;
         lookAngle = nearest.angle;
         stateLabel = "Run";
       }
-    } else if (!hasGun && pickupAvailable) {
-      /* ── SEEK WEAPON (no enemy nearby) ── */
+
+    } else if (pickupAvailable && !hasGun) {
+      /* No enemy nearby, no gun: sprint to nearest weapon */
       moveAngle = nearestPickup.angle;
       stateLabel = "Run";
-    } else if (
-      hasGun &&
-      ammo != null &&
-      ammo <= LOW_AMMO_THRESHOLD &&
-      pickupAvailable
-    ) {
-      /* ── LOW AMMO – seek new weapon ── */
+
+    } else if (hasGun && ammo != null && ammo <= LOW_AMMO_THRESHOLD && pickupAvailable) {
+      /* Low ammo: grab another weapon while hunting */
       moveAngle = nearestPickup.angle;
       stateLabel = "Run";
-    } else if (nearest && nearest.distance < detectRadius + 8) {
-      /* ── Enemy just outside detection – patrol toward ── */
+
+    } else if (nearest) {
+      /* Enemy exists but outside detection: hunt them down */
       moveAngle = nearest.angle;
       stateLabel = "Run";
+
     } else {
-      /* ── WANDER / PATROL ── */
+      /* Nobody alive / nobody found: patrol aggressively */
       moveAngle = wanderAngleRef.current;
       stateLabel = "Run";
     }
 
-    /* ── Override movement if stuck-recovery is active ── */
     if (recoveryRef.current.active) {
       moveAngle = recoveryRef.current.angle;
       stateLabel = "Run";
     }
 
-    /* Track last intended direction for stuck recovery */
     if (moveAngle !== null) lastMoveAngleRef.current = moveAngle;
+
+    /* ── Obstacle-aware movement: raycast and steer around obstacles ── */
+    if (moveAngle !== null && world && rapier) {
+      moveAngle = findClearDirection(world, rapier, rayOrigin, moveAngle, OBSTACLE_LOOKAHEAD, myRigidBodyHandle);
+    }
 
     /* ── Smooth rotation ── */
     const targetAngle = lookAngle ?? moveAngle;

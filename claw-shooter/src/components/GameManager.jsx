@@ -1,203 +1,229 @@
-import { createContext, useContext, useState, useCallback, useRef, useEffect } from "react";
-import { Vector3 } from "three";
-import { GUN_TYPES, INITIAL_WEAPON_PICKUPS, MAP_BOUNDS, MIN_DISTANCE_GUN_FROM_PLAYER_SPAWN, MIN_DISTANCE_GUN_FROM_GUN } from "../constants/weapons";
+/**
+ * GameManager – refactored to consume server state via Socket.IO.
+ *
+ * No local game logic: all state comes from the shooter server.
+ * The context provides the latest spectator state, match end data,
+ * betting state, and a selectedBotId for the follow camera.
+ */
+
+import { createContext, useContext, useState, useEffect, useRef, useCallback } from "react";
+import { io } from "socket.io-client";
 
 const GameManagerContext = createContext(null);
 
+/** Resolve the Socket.IO server URL. In dev, connect to the Express server. */
+function getServerUrl() {
+  if (typeof window === "undefined") return "";
+  return window.location.origin;
+}
+
 export function GameManagerProvider({ children }) {
-  const [gamePhase, setGamePhase] = useState("lobby"); // lobby -> countdown -> playing -> ended
-  const [countdown, setCountdown] = useState(0);
-  const [weaponPickups, setWeaponPickups] = useState([]);
-  const [finalRanking, setFinalRanking] = useState([]);
-  const [selectedBotId, setSelectedBotId] = useState(null); // null = free cam, string = third-person follow that bot
-  /** Server-driven spectator state (when phase === 'active'): { players, pickups, leaderboard, timeRemaining, phase } */
-  const [spectatorMatchState, setSpectatorMatchState] = useState(null);
-  /** World Y of map floor from Map onReady; used so spectator pickups/players sit on the ground */
-  const [mapFloorY, setMapFloorY] = useState(0);
-  const countdownRef = useRef(null);
-  const matchStartTimeRef = useRef(null); // set when phase transitions to "playing"
-  const spawnPositionsRef = useRef([]);
-  /** Set by Experience: () => array of {x,y,z} currently occupied by bots (alive, not dead) */
-  const getOccupiedBotPositionsRef = useRef(null);
-  /** Ref to current weapon pickups so addWeaponPickup can avoid spawning on top of them */
-  const weaponPickupsRef = useRef([]);
-  useEffect(() => {
-    weaponPickupsRef.current = weaponPickups;
-  }, [weaponPickups]);
+  const [gameState, setGameState] = useState(null);
+  const [matchStatus, setMatchStatus] = useState(null);
+  const [matchEnd, setMatchEnd] = useState(null);
+  const [shots, setShots] = useState([]);
+  const [hits, setHits] = useState([]);
+  const [selectedBotId, setSelectedBotId] = useState(null);
+  const socketRef = useRef(null);
+  const shotIdRef = useRef(0);
+  const hitIdRef = useRef(0);
 
-  const startMatch = useCallback(() => {
-    if (gamePhase !== "lobby") return;
-    setGamePhase("countdown");
-    let remaining = 3;
-    setCountdown(remaining);
-    countdownRef.current = setInterval(() => {
-      remaining -= 1;
-      if (remaining <= 0) {
-        clearInterval(countdownRef.current);
-        countdownRef.current = null;
-        setCountdown(0);
-        matchStartTimeRef.current = Date.now();
-        setGamePhase("playing");
-      } else {
-        setCountdown(remaining);
+  // Betting state
+  const [bettingStatus, setBettingStatus] = useState(null);
+  const [currentMatchId, setCurrentMatchId] = useState(null);
+  const [lastBetToast, setLastBetToast] = useState(null);
+  const [bettingResolved, setBettingResolved] = useState(null);
+  const [winningsDistributed, setWinningsDistributed] = useState(null);
+
+  useEffect(() => {
+    const url = getServerUrl();
+    const socket = io(`${url}/shooter`, {
+      transports: ["websocket"],
+      reconnection: true,
+      reconnectionDelay: 1000,
+    });
+    socketRef.current = socket;
+
+    socket.on("connect", () => {
+      console.log("[ShooterClient] Connected to /shooter namespace");
+    });
+
+    socket.on("shooterState", (state) => {
+      setGameState(state);
+      setMatchEnd(null);
+    });
+
+    socket.on("shooterStatus", (status) => {
+      setMatchStatus(status);
+      if (status.currentMatch) {
+        setCurrentMatchId(status.currentMatch.id);
       }
-    }, 1000);
-  }, [gamePhase]);
+    });
 
-  const takePickup = useCallback((pickupId) => {
-    setWeaponPickups((prev) =>
-      prev.map((p) => (p.id === pickupId ? { ...p, taken: true } : p))
-    );
-  }, []);
+    socket.on("shooterShot", (shot) => {
+      const id = shotIdRef.current++;
+      setShots((prev) => [...prev.slice(-12), { ...shot, _id: id }]);
+    });
 
-  /** Spawn a single weapon pickup at a random position (e.g. dropped on bot death). */
-  const addWeaponPickup = useCallback((weaponType) => {
-    const minDistFromGun = MIN_DISTANCE_GUN_FROM_GUN;
-    const existing = weaponPickupsRef.current.filter((p) => !p.taken);
-    const dist = (a, b) => {
-      const ax = a?.x ?? 0, az = a?.z ?? 0;
-      const bx = b?.x ?? 0, bz = b?.z ?? 0;
-      return Math.sqrt((ax - bx) ** 2 + (az - bz) ** 2);
+    socket.on("shooterHit", (hit) => {
+      const id = hitIdRef.current++;
+      setHits((prev) => [...prev.slice(-20), { ...hit, _id: id }]);
+    });
+
+    socket.on("shooterMatchEnd", (result) => {
+      setMatchEnd(result);
+    });
+
+    socket.on("shooterLobbyOpen", (data) => {
+      setMatchEnd(null);
+      setGameState(null);
+      setCurrentMatchId(data.matchId);
+      setBettingStatus(null);
+      setBettingResolved(null);
+    });
+
+    // ── Betting socket events ──────────────────────────────────────────
+    socket.on("bettingPending", (data) => {
+      setCurrentMatchId(data.matchId);
+      if (data.agentNames && data.agentNames.length) {
+        setBettingStatus({
+          matchId: data.matchId,
+          status: "pending",
+          totalPool: "0",
+          totalPoolMON: "0",
+          agents: data.agentNames.map((name) => ({
+            agentName: name,
+            pool: "0",
+            poolMON: "0",
+            percentage: 0,
+            multiplier: 0,
+            bettorCount: 0,
+          })),
+          bettorCount: 0,
+        });
+      }
+    });
+
+    socket.on("bettingOpen", (data) => {
+      setCurrentMatchId(data.matchId);
+      if (data.agentNames && data.agentNames.length) {
+        setBettingStatus({
+          matchId: data.matchId,
+          status: "open",
+          totalPool: "0",
+          totalPoolMON: "0",
+          agents: data.agentNames.map((name) => ({
+            agentName: name,
+            pool: "0",
+            poolMON: "0",
+            percentage: 0,
+            multiplier: 0,
+            bettorCount: 0,
+          })),
+          bettorCount: 0,
+        });
+      }
+    });
+
+    socket.on("bettingAgentsUpdate", (data) => {
+      setBettingStatus((prev) => {
+        if (!prev || prev.matchId !== data.matchId) return prev;
+        const existingNames = new Set(prev.agents.map((a) => a.agentName));
+        const newAgents = (data.agentNames || [])
+          .filter((n) => !existingNames.has(n))
+          .map((name) => ({
+            agentName: name,
+            pool: "0",
+            poolMON: "0",
+            percentage: 0,
+            multiplier: 0,
+            bettorCount: 0,
+          }));
+        return { ...prev, agents: [...prev.agents, ...newAgents] };
+      });
+    });
+
+    socket.on("bettingUpdate", (status) => {
+      setBettingStatus(status);
+    });
+
+    socket.on("betPlaced", (data) => {
+      setLastBetToast(data);
+    });
+
+    socket.on("bettingClosed", (data) => {
+      setBettingStatus((prev) => {
+        if (!prev || prev.matchId !== data.matchId) return prev;
+        return { ...prev, status: "closed" };
+      });
+    });
+
+    socket.on("bettingResolved", (data) => {
+      setBettingResolved(data);
+      setBettingStatus((prev) => {
+        if (!prev || prev.matchId !== data.matchId) return prev;
+        return { ...prev, status: "resolved" };
+      });
+    });
+
+    socket.on("winningsDistributed", (data) => {
+      setWinningsDistributed(data);
+    });
+
+    socket.on("disconnect", () => {
+      console.log("[ShooterClient] Disconnected");
+    });
+
+    return () => {
+      socket.disconnect();
+      socketRef.current = null;
     };
-    let positions = spawnPositionsRef.current;
-    if (positions && positions.length > 0) {
-      positions = positions.filter((p) =>
-        existing.every((e) => dist(p, e.position) >= minDistFromGun)
-      );
-    }
-    let position;
-    if (positions && positions.length > 0) {
-      const pos = positions[Math.floor(Math.random() * positions.length)];
-      position =
-        pos instanceof Vector3 ? pos : new Vector3(pos.x, pos.y ?? 0, pos.z);
-    } else {
-      position = new Vector3(
-        MAP_BOUNDS.minX + Math.random() * (MAP_BOUNDS.maxX - MAP_BOUNDS.minX),
-        0,
-        MAP_BOUNDS.minZ + Math.random() * (MAP_BOUNDS.maxZ - MAP_BOUNDS.minZ)
-      );
-    }
-    setWeaponPickups((prev) => [
-      ...prev,
-      {
-        id: `drop-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        weaponType,
-        position,
-        taken: false,
-      },
-    ]);
   }, []);
 
-  const spawnWeaponPickups = useCallback((spawnPositions) => {
-    if (!spawnPositions || spawnPositions.length === 0) return;
-    spawnPositionsRef.current = spawnPositions;
-    const occupied = getOccupiedBotPositionsRef.current?.() ?? [];
-    const minDistFromBot = MIN_DISTANCE_GUN_FROM_PLAYER_SPAWN;
-    const minDistFromGun = MIN_DISTANCE_GUN_FROM_GUN;
-    let positions = spawnPositions.filter((sp) => {
-      const sx = sp.x ?? 0, sz = sp.z ?? 0;
-      const tooClose = occupied.some((o) => {
-        const ox = o?.x ?? 0, oz = o?.z ?? 0;
-        const dx = sx - ox, dz = sz - oz;
-        return Math.sqrt(dx * dx + dz * dz) < minDistFromBot;
-      });
-      return !tooClose;
-    });
-    if (positions.length === 0) return;
-    shuffle(positions);
-    const pickups = [];
-    const count = Math.min(INITIAL_WEAPON_PICKUPS, positions.length);
-    const chosen = [];
-    for (let i = 0; i < count; i++) {
-      const cx = (x) => x?.x ?? 0;
-      const cz = (x) => x?.z ?? 0;
-      const dist = (a, b) => Math.sqrt((cx(a) - cx(b)) ** 2 + (cz(a) - cz(b)) ** 2);
-      positions = positions.filter((p) => chosen.every((c) => dist(p, c) >= minDistFromGun));
-      if (positions.length === 0) break;
-      const pos = positions[0];
-      chosen.push(pos);
-      const weaponType = GUN_TYPES[i % GUN_TYPES.length];
-      pickups.push({
-        id: `pickup-${i}-${Date.now()}`,
-        weaponType,
-        position: pos instanceof Vector3 ? pos : new Vector3(pos.x, pos.y ?? 0, pos.z),
-        taken: false,
-      });
-    }
-    setWeaponPickups(pickups);
-  }, []);
-
-  const checkWinCondition = useCallback((players) => {
-    if (gamePhase !== "playing") return;
-    /* Game ends when at most one bot still has lives left (each bot starts with 3 lives) */
-    const withLivesLeft = players.filter((p) => {
-      const state = p.state;
-      if (!state) return false;
-      const lives = state.getState?.("lives") ?? state.lives ?? 3;
-      return lives > 0;
-    });
-    if (withLivesLeft.length <= 1) {
-      const now = Date.now();
-      const getSurvivalSeconds = (p) => {
-        const state = p.state;
-        const accumulated = state.getState?.("survivalTime") ?? state.survivalTime ?? 0;
-        const aliveSince = state.getState?.("aliveSince") ?? state.aliveSince ?? now;
-        const lives = state.getState?.("lives") ?? state.lives ?? 0;
-        const eliminated = state.getState?.("eliminated") ?? state.eliminated;
-        const dead = state.getState?.("dead") ?? state.dead;
-        if (lives > 0 && !eliminated && !dead) {
-          return accumulated + (now - aliveSince) / 1000;
-        }
-        return accumulated;
-      };
-      const ranking = [...players]
-        .filter((p) => p.state)
-        .sort((a, b) => getSurvivalSeconds(b) - getSurvivalSeconds(a))
-        .map((p, i) => ({
-          rank: i + 1,
-          id: p.state?.id ?? p.id,
-          name: p.state?.getProfile?.()?.name ?? p.state?.profile?.name ?? p.id,
-          kills: p.state?.getState?.("kills") ?? p.state?.kills ?? 0,
-          deaths: p.state?.getState?.("deaths") ?? p.state?.deaths ?? 0,
-          personality: p.state?.getState?.("personality") ?? p.state?.personality ?? "?",
-          survivalTimeSeconds: getSurvivalSeconds(p),
-        }));
-      setFinalRanking(ranking);
-      setGamePhase("ended");
-    }
-  }, [gamePhase]);
-
-  const restartRound = useCallback((spawnPositions) => {
-    setGamePhase("playing");
-    setFinalRanking([]);
-    spawnWeaponPickups(spawnPositions);
-  }, [spawnWeaponPickups]);
+  // Clean up old shots/hits quickly so trails don't persist
+  useEffect(() => {
+    if (shots.length === 0) return;
+    const timer = setTimeout(() => {
+      setShots((prev) => prev.slice(Math.max(0, prev.length - 4)));
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [shots.length]);
 
   useEffect(() => {
-    if (gamePhase !== "playing") matchStartTimeRef.current = null;
-  }, [gamePhase]);
+    if (hits.length === 0) return;
+    const timer = setTimeout(() => {
+      setHits((prev) => prev.slice(Math.max(0, prev.length - 5)));
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [hits.length]);
+
+  // Derive phase from game state + match status
+  const serverPhase = gameState?.phase || matchStatus?.currentMatch?.phase;
+  const gamePhase = matchEnd
+    ? "ended"
+    : serverPhase === "active"
+      ? "playing"
+      : serverPhase === "countdown"
+        ? "countdown"
+        : "lobby";
 
   const value = {
+    gameState,
+    matchStatus,
+    matchEnd,
     gamePhase,
-    setGamePhase,
-    countdown,
-    startMatch,
-    weaponPickups,
-    setWeaponPickups,
-    takePickup,
-    addWeaponPickup,
-    spawnWeaponPickups,
-    checkWinCondition,
-    restartRound,
-    finalRanking,
-    getOccupiedBotPositionsRef,
+    shots,
+    hits,
     selectedBotId,
     setSelectedBotId,
-    matchStartTimeRef,
-    spectatorMatchState,
-    setSpectatorMatchState,
-    mapFloorY,
-    setMapFloorY,
+    // Betting
+    bettingStatus,
+    setBettingStatus,
+    currentMatchId,
+    lastBetToast,
+    bettingResolved,
+    winningsDistributed,
+    socketRef,
   };
 
   return (
@@ -205,14 +231,6 @@ export function GameManagerProvider({ children }) {
       {children}
     </GameManagerContext.Provider>
   );
-}
-
-function shuffle(arr) {
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  return arr;
 }
 
 export function useGameManager() {

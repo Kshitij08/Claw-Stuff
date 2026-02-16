@@ -1,7 +1,13 @@
+/**
+ * SpectatorCamera – refactored to use server state instead of PlayroomKit.
+ *
+ * Free camera (orbit) by default. Click a player name in leaderboard or on
+ * the 3D scene to follow them in third person.
+ */
+
 import { useRef, useEffect } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
-import { usePlayersList } from "playroomkit";
 import { Vector3 } from "three";
 import { useGameManager } from "./GameManager";
 
@@ -9,20 +15,19 @@ const PAN_SPEED = 15;
 const keyState = { forward: false, back: false, left: false, right: false };
 const MAP_CENTER = new Vector3(0, 0, 0);
 
-/** Third-person offset: camera behind and above the bot (world space). */
 const THIRD_PERSON_OFFSET = new Vector3(0, 6, 10);
 const THIRD_PERSON_LOOK_AT_Y = 1.5;
-/** Smoothing factor for follow camera: 1 = instant, lower = smoother (reduces jitter). */
 const FOLLOW_SMOOTH = 12;
+/** Smooth the followed bot position so the camera doesn't stutter when server state updates (20 Hz). */
+const BOT_POS_SMOOTH = 10;
 
 export function SpectatorCamera() {
   const controlsRef = useRef();
   const { camera } = useThree();
-  const { selectedBotId, setSelectedBotId, spectatorMatchState, mapFloorY } = useGameManager();
-  const players = usePlayersList(true);
-  const spectatorPlayers = spectatorMatchState?.phase === "active" ? spectatorMatchState.players : [];
+  const { selectedBotId, setSelectedBotId, gameState } = useGameManager();
   const followPosRef = useRef(new Vector3());
   const followTargetRef = useRef(new Vector3());
+  const followBotPosRef = useRef(new Vector3()); // Smoothed bot position to avoid stutter
   const followInitializedRef = useRef(false);
   const leftMouseDownRef = useRef(false);
   const userHasRotatedRef = useRef(false);
@@ -97,40 +102,39 @@ export function SpectatorCamera() {
     const controls = controlsRef.current;
     if (!controls) return;
 
-    if (selectedBotId) {
+    // Find selected player in server state
+    if (selectedBotId && gameState?.players) {
       if (prevSelectedBotIdRef.current !== selectedBotId) {
         followInitializedRef.current = false;
         userHasRotatedRef.current = false;
         prevSelectedBotIdRef.current = selectedBotId;
       }
-      let bx, by, bz;
-      const spectatorBot = spectatorPlayers.find((p) => p.id === selectedBotId);
-      if (spectatorBot) {
-        bx = spectatorBot.x ?? 0;
-        by = mapFloorY ?? 0;
-        bz = spectatorBot.z ?? 0;
-      } else {
-        const bot = players.find((p) => p.id === selectedBotId);
-        const pos = bot?.state?.pos ?? bot?.state?.getState?.("pos");
-        if (!pos) {
-          followInitializedRef.current = false;
-          prevSelectedBotIdRef.current = null;
-          return;
-        }
-        bx = pos.x ?? 0;
-        by = pos.y ?? 0;
-        bz = pos.z ?? 0;
-      }
-      {
-        const wantCam = new Vector3(bx + THIRD_PERSON_OFFSET.x, by + THIRD_PERSON_OFFSET.y, bz + THIRD_PERSON_OFFSET.z);
-        const wantTgt = new Vector3(bx, by + THIRD_PERSON_LOOK_AT_Y, bz);
+
+      const bot = gameState.players.find((p) => p.id === selectedBotId);
+      if (bot) {
+        const bx = bot.x ?? 0;
+        const by = bot.y ?? 0;
+        const bz = bot.z ?? 0;
+        const rawBot = new Vector3(bx, by, bz);
+
         if (!followInitializedRef.current) {
-          followPosRef.current.copy(wantCam);
-          followTargetRef.current.copy(wantTgt);
+          followBotPosRef.current.copy(rawBot);
+          followPosRef.current.set(bx + THIRD_PERSON_OFFSET.x, by + THIRD_PERSON_OFFSET.y, bz + THIRD_PERSON_OFFSET.z);
+          followTargetRef.current.set(bx, by + THIRD_PERSON_LOOK_AT_Y, bz);
           followInitializedRef.current = true;
         }
+
+        // Smooth bot position so camera doesn't stutter when server state jumps (20 Hz)
+        followBotPosRef.current.lerp(rawBot, Math.min(1, BOT_POS_SMOOTH * delta));
+        const sx = followBotPosRef.current.x;
+        const sy = followBotPosRef.current.y;
+        const sz = followBotPosRef.current.z;
+        const wantCam = new Vector3(sx + THIRD_PERSON_OFFSET.x, sy + THIRD_PERSON_OFFSET.y, sz + THIRD_PERSON_OFFSET.z);
+        const wantTgt = new Vector3(sx, sy + THIRD_PERSON_LOOK_AT_Y, sz);
+
         const isRotating = leftMouseDownRef.current;
         const keepUserAngle = userHasRotatedRef.current;
+
         if (isRotating || keepUserAngle) {
           followTargetRef.current.lerp(wantTgt, Math.min(1, FOLLOW_SMOOTH * delta));
           controls.target.copy(followTargetRef.current);
@@ -145,6 +149,7 @@ export function SpectatorCamera() {
       }
       return;
     }
+
     followInitializedRef.current = false;
     userHasRotatedRef.current = false;
     prevSelectedBotIdRef.current = null;

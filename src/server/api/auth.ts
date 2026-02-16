@@ -89,7 +89,7 @@ export function createTestAgent(name: string): AgentInfo {
 // Rate limiting per API key
 const rateLimits = new Map<string, { count: number; windowStart: number }>();
 const RATE_LIMIT_WINDOW = 1000; // 1 second
-const MAX_REQUESTS_PER_WINDOW = 5;
+const MAX_REQUESTS_PER_WINDOW = 10;
 
 export function checkRateLimit(apiKey: string): { allowed: boolean; retryAfterMs?: number } {
   const now = Date.now();

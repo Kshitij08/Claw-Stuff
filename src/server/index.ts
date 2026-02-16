@@ -15,6 +15,10 @@ import { createNftRoutes } from './nft/routes.js';
 import { setEmitter } from './betting/service.js';
 import { getProceduralBodyBuffer, getProceduralEyesBuffer, getProceduralMouthBuffer } from './snakeGenerator.js';
 
+// Shooter game imports
+import { ShooterMatchManager } from './shooter/match.js';
+import { createShooterRoutes } from './shooter/routes.js';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
@@ -90,6 +94,10 @@ app.get('/skill.md', (req, res) => {
   res.type('text/markdown');
   res.sendFile(join(__dirname, '../../SKILL.md'));
 });
+app.get('/shooter-skill.md', (req, res) => {
+  res.type('text/markdown');
+  res.sendFile(join(__dirname, '../../SHOOTER-SKILL.md'));
+});
 
 // Serve static files (spectator frontend)
 app.use(express.static(join(__dirname, '../../public')));
@@ -98,15 +106,20 @@ app.use(express.static(join(__dirname, '../../public')));
 const matchManager = new MatchManager();
 const shooterMatchManager = new ShooterMatchManager();
 
-// API routes
+// API routes — Snake game
 app.use('/api', createRoutes(matchManager));
 app.use('/api/shooter', createShooterRoutes(shooterMatchManager));
 app.use('/api/betting', createBettingRoutes());
 app.use('/api', createNftRoutes());
 
+// API routes — Shooter game
+app.use('/api/shooter', createShooterRoutes(shooterMatchManager));
+
 // Wire betting service WebSocket emitter so betting events are broadcast to spectators
+// Emit to both root (snake) and /shooter namespace so both frontends receive betting events
 setEmitter((event: string, data: any) => {
   io.emit(event, data);
+  shooterNs.emit(event, data);
 });
 
 // ── Socket.IO memory protection ─────────────────────────────────────
@@ -210,25 +223,94 @@ matchManager.onStatusChange(() => {
   io.emit('status', matchManager.getStatus());
 });
 
-// Shooter: broadcast state on each tick (throttled to ~10 Hz like snake game)
-let shooterTickCounter = 0;
-shooterMatchManager.onStateUpdate((state) => {
-  shooterTickCounter++;
-  if (shooterTickCounter % 2 === 0) {
-    io.volatile.emit('shooterGameState', state);
+// ══════════════════════════════════════════════════════════════════
+// ── Shooter game Socket.IO namespace (/shooter) ──────────────────
+// ══════════════════════════════════════════════════════════════════
+const shooterNs = io.of('/shooter');
+
+shooterNs.on('connection', (socket) => {
+  const connectedCount = shooterNs.sockets.size;
+  if (connectedCount > MAX_CONNECTIONS) {
+    socket.disconnect(true);
+    return;
   }
+
+  // Send current state immediately
+  const state = shooterMatchManager.getSpectatorState();
+  if (state) {
+    socket.emit('shooterState', state);
+  }
+  socket.emit('shooterStatus', shooterMatchManager.getStatus());
+
+  // Handle human bet notification (same as root namespace handler)
+  socket.on('humanBetPlaced', async (data: {
+    matchId: string;
+    bettorAddress: string;
+    agentName: string;
+    amountWei: string;
+    txHash: string;
+    token?: 'MON' | 'MCLAW';
+  }) => {
+    try {
+      const { placeBet } = await import('./betting/service.js');
+      await placeBet({
+        bettorAddress: data.bettorAddress,
+        bettorType: 'human',
+        bettorName: null,
+        matchId: data.matchId,
+        agentName: data.agentName,
+        amountWei: data.amountWei,
+        token: data.token === 'MCLAW' ? 'MCLAW' : 'MON',
+        txHash: data.txHash,
+      });
+    } catch (err) {
+      console.error('[ws/shooter] humanBetPlaced handler failed:', err);
+    }
+  });
+
+  socket.on('disconnect', () => {
+    // no-op
+  });
+});
+
+// Broadcast every tick (20 Hz) so spectator movement is smooth, not teleporting
+shooterMatchManager.onStateUpdate((state) => {
+  shooterNs.volatile.emit('shooterState', state);
+});
+
+shooterMatchManager.onShot((shot) => {
+  shooterNs.volatile.emit('shooterShot', shot);
+});
+
+shooterMatchManager.onHit((hit) => {
+  shooterNs.volatile.emit('shooterHit', hit);
+});
+
+shooterMatchManager.onMatchEndEvent((result) => {
+  shooterNs.emit('shooterMatchEnd', result);
+});
+
+shooterMatchManager.onLobbyOpen((matchId, startsAt) => {
+  shooterNs.emit('shooterLobbyOpen', { matchId, startsAt });
+  shooterNs.emit('shooterStatus', shooterMatchManager.getStatus());
+});
+
+shooterMatchManager.onStatusChange(() => {
+  shooterNs.emit('shooterStatus', shooterMatchManager.getStatus());
 });
 
 // Start server
 httpServer.listen(PORT, () => {
   console.log(`
 ╔══════════════════════════════════════════════════════════════╗
-║                          🐍 CLAW IO 🐍                         ║
+║                    CLAW IO + CLAW SHOOTER                    ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  Server running on http://localhost:${PORT}                      ║
 ║                                                              ║
-║  Spectator view: http://localhost:${PORT}                        ║
-║  API Status:     http://localhost:${PORT}/api/status             ║
+║  Snake spectator:   http://localhost:${PORT}                     ║
+║  Snake API status:  http://localhost:${PORT}/api/status          ║
+║  Shooter spectator: http://localhost:${PORT}/claw-shooter/       ║
+║  Shooter API:       http://localhost:${PORT}/api/shooter/status  ║
 ║                                                              ║
 ║  Mode: ${DEV_MODE ? 'DEVELOPMENT (test keys allowed)' : 'PRODUCTION'}                       ║
 ╚══════════════════════════════════════════════════════════════╝
@@ -236,7 +318,11 @@ httpServer.listen(PORT, () => {
 
   // Start the match schedulers (async initialization)
   matchManager.start().catch((err) => {
-    console.error('Failed to start match manager:', err);
+    console.error('Failed to start snake match manager:', err);
+  });
+
+  shooterMatchManager.start().catch((err) => {
+    console.error('Failed to start shooter match manager:', err);
   });
   shooterMatchManager.start().catch((err) => {
     console.error('Failed to start shooter match manager:', err);

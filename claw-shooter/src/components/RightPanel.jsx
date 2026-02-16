@@ -1,7 +1,17 @@
-import { usePlayersList } from "playroomkit";
+/**
+ * RightPanel – refactored to consume server state from GameManager context.
+ */
+
 import { useGameManager } from "./GameManager";
 import { useState, useEffect } from "react";
-import { WEAPON_LABELS } from "../constants/weapons";
+
+const WEAPON_LABELS = {
+  knife: "Knife",
+  pistol: "Pistol",
+  smg: "SMG",
+  shotgun: "Shotgun",
+  assault_rifle: "Assault Rifle",
+};
 
 function formatSeconds(seconds) {
   const m = Math.floor(seconds / 60);
@@ -10,55 +20,29 @@ function formatSeconds(seconds) {
 }
 
 export function RightPanel() {
-  const allPlayers = usePlayersList(true);
-  const { gamePhase, matchStartTimeRef, selectedBotId, setSelectedBotId, spectatorMatchState } = useGameManager();
+  const { gameState, gamePhase, selectedBotId, setSelectedBotId } = useGameManager();
   const [elapsedTick, setElapsedTick] = useState(0);
 
-  const bots = allPlayers.filter((p) => p.state?.isBot?.() ?? p.isBot?.() ?? false);
-  const isSpectatorMode = spectatorMatchState?.phase === "active" && Array.isArray(spectatorMatchState?.leaderboard);
+  const players = gameState?.players ?? [];
+  const timeRemaining = gameState?.timeRemaining ?? 0;
 
-  const aliveCount = isSpectatorMode
-    ? spectatorMatchState.leaderboard.filter((e) => e.alive).length
-    : bots.filter((p) => {
-        const state = p.state;
-        const eliminated = state?.getState?.("eliminated") ?? state?.eliminated;
-        const lives = state?.getState?.("lives") ?? state?.lives ?? 3;
-        const dead = state?.getState?.("dead") ?? state?.dead;
-        return !eliminated && lives > 0 && !dead;
-      }).length;
+  const aliveCount = players.filter((p) => p.alive && !p.eliminated).length;
 
-  const getSurvivalSeconds = (p) => {
-    const state = p.state;
-    if (!state) return 0;
-    const accumulated = state.getState?.("survivalTime") ?? state.survivalTime ?? 0;
-    const aliveSince = state.getState?.("aliveSince") ?? state.aliveSince ?? Date.now();
-    const lives = state.getState?.("lives") ?? state.lives ?? 0;
-    const eliminated = state.getState?.("eliminated") ?? state.eliminated;
-    const dead = state.getState?.("dead") ?? state.dead;
-    if (lives > 0 && !eliminated && !dead) {
-      return accumulated + (Date.now() - aliveSince) / 1000;
-    }
-    return accumulated;
-  };
-
-  const playroomLeaderboardEntries = [...bots]
-    .map((p) => {
-      const state = p.state;
-      return {
-        id: p.id,
-        player: p,
-        name: state?.getProfile?.()?.name ?? state?.profile?.name ?? state?.getState?.("profile")?.name ?? p.id,
-        survivalSeconds: getSurvivalSeconds(p),
-        kills: state?.getState?.("kills") ?? state?.kills ?? 0,
-        deaths: state?.getState?.("deaths") ?? state?.deaths ?? 0,
-        lives: state?.getState?.("lives") ?? state?.lives ?? 3,
-        weapon: state?.getState?.("weapon") ?? state?.weapon ?? "knife",
-        ammo: state?.getState?.("ammo") ?? state?.ammo ?? null,
-        eliminated: state?.getState?.("eliminated") ?? state?.eliminated,
-        color: state?.getProfile?.()?.color?.hexString ?? state?.profile?.color ?? "#888",
-      };
-    })
-    .sort((a, b) => b.survivalSeconds - a.survivalSeconds);
+  // Sort by survival time (descending)
+  const leaderboardEntries = [...players]
+    .sort((a, b) => (b.survivalTime ?? 0) - (a.survivalTime ?? 0))
+    .map((p) => ({
+      id: p.id,
+      name: p.name,
+      survivalSeconds: p.survivalTime ?? 0,
+      kills: p.kills ?? 0,
+      deaths: p.deaths ?? 0,
+      lives: p.lives ?? 3,
+      weapon: p.weapon ?? "knife",
+      ammo: p.ammo ?? null,
+      eliminated: p.eliminated,
+      alive: p.alive,
+    }));
 
   const leaderboardEntries = isSpectatorMode
     ? spectatorMatchState.leaderboard.map((e, i) => ({
@@ -82,19 +66,16 @@ export function RightPanel() {
     return () => clearInterval(id);
   }, [gamePhase]);
 
-  const matchElapsed = isSpectatorMode && spectatorMatchState?.timeRemaining != null
-    ? Math.max(0, spectatorMatchState.timeRemaining)
-    : gamePhase === "playing" && matchStartTimeRef?.current
-      ? (Date.now() - matchStartTimeRef.current) / 1000
-      : null;
-
   const phaseClass =
     isSpectatorMode || gamePhase === "playing"
       ? "match-phase phase-active"
       : gamePhase === "lobby"
         ? "match-phase phase-lobby"
         : "match-phase phase-finished";
-  const phaseLabel = isSpectatorMode ? "Spectator" : gamePhase === "lobby" ? "Waiting" : gamePhase === "playing" ? "In Progress" : "Finished";
+  const phaseLabel =
+    gamePhase === "lobby" ? "Waiting" :
+    gamePhase === "countdown" ? "Starting..." :
+    gamePhase === "playing" ? "In Progress" : "Finished";
 
   return (
     <aside className="w-full md:w-80 lg:w-96 flex flex-col z-20 gap-4 flex-shrink-0 order-3">
@@ -106,12 +87,12 @@ export function RightPanel() {
         </div>
         <div className="flex items-center justify-between bg-slate-900 p-3 border-2 border-white">
           <div className="text-2xl md:text-3xl neo-font text-white tabular-nums">
-            {matchElapsed != null ? formatSeconds(matchElapsed) : "--:--"}
+            {gamePhase === "playing" ? formatSeconds(timeRemaining) : "--:--"}
           </div>
           <div className="text-right">
             <div className="text-xs font-bold text-slate-400 uppercase">{isSpectatorMode ? "Time left" : "Players"}</div>
             <div className="text-2xl font-black text-[#d946ef]">
-              {isSpectatorMode ? `${aliveCount} alive` : `${aliveCount} / ${bots.length}`}
+              {aliveCount} / {players.length}
             </div>
           </div>
         </div>
@@ -128,7 +109,7 @@ export function RightPanel() {
           </h3>
         </div>
         <div className="flex-1 overflow-y-auto p-3 custom-scrollbar">
-          <div className="text-[10px] font-bold text-slate-500 mb-2 px-0.5">Click a row to follow that bot</div>
+          <div className="text-[10px] font-bold text-slate-500 mb-2 px-0.5">Click a row to follow that agent</div>
           {leaderboardEntries.length === 0 ? (
             <p className="text-xs text-slate-500 text-center py-4">No agents yet</p>
           ) : (
@@ -149,7 +130,6 @@ export function RightPanel() {
                     <div className="flex justify-between items-center gap-2">
                       <span className="font-bold text-white truncate flex items-center gap-1.5">
                         <span className="text-slate-500 w-5 flex-shrink-0">#{i + 1}</span>
-                        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: entry.color }} />
                         {entry.name}
                       </span>
                       <span className="text-[#a3e635] font-mono tabular-nums text-xs whitespace-nowrap flex-shrink-0">
@@ -170,35 +150,6 @@ export function RightPanel() {
         </div>
         <div className="p-3 bg-slate-900 text-white border-t-2 border-white flex flex-col gap-1 text-xs font-bold uppercase font-mono">
           <div className="text-slate-400">Ranked by survival time</div>
-        </div>
-      </div>
-
-      {/* Hall of Fame Widget */}
-      <div className="neo-card flex-1 flex flex-col overflow-hidden min-h-[250px] md:min-h-0">
-        <div className="p-4 border-b-2 border-white bg-[#facc15]">
-          <h3 className="text-sm font-black uppercase text-black flex items-center gap-2">
-            <svg className="w-4 h-4 text-black" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M12 2l2.4 7.4h7.6l-6 4.6 2.3 7-6.3-4.6L5.7 21l2.3-7-6-4.6h7.6L12 2z" />
-            </svg>
-            Hall of Fame
-          </h3>
-        </div>
-        <div className="flex-1 overflow-y-auto p-3 custom-scrollbar">
-          <div className="flex justify-between items-center text-[10px] font-bold text-slate-500 mb-2 px-0.5">
-            <span>Agent</span>
-            <span>Wins / Matches</span>
-          </div>
-          <p className="text-xs text-slate-500 text-center py-6">Global stats coming soon</p>
-        </div>
-        <div className="p-3 bg-slate-900 text-white border-t-2 border-white flex flex-col gap-1 text-sm font-bold uppercase font-mono">
-          <div className="flex justify-between">
-            <span className="text-slate-400">Bots</span>
-            <span id="bot-count" className="text-[#a3e635]">{isSpectatorMode ? spectatorMatchState.leaderboard.length : bots.length}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-slate-400">Total games</span>
-            <span id="total-games" className="text-[#a3e635]">—</span>
-          </div>
         </div>
       </div>
     </aside>

@@ -1,9 +1,34 @@
+/**
+ * Map – visual-only renderer (no client-side Rapier physics).
+ *
+ * Physics runs on the server; this just renders the GLB visually.
+ * Applies the same scale/center transform as before so positions match the server.
+ * MapLevelDebugColliders renders the same geometry as wireframe for debug.
+ */
+
 import { useGLTF } from "@react-three/drei";
 import { Component, useEffect, useMemo } from "react";
-import { RigidBody } from "@react-three/rapier";
 import { Box3, Vector3 } from "three";
+import * as THREE from "three";
 
-/** Error boundary: if Map fails to load (e.g. map4.glb 404), render Map with fallback path. */
+/** World-space horizontal size of the map (same scale/center as MapVisual). Use for arena debug box. */
+export function useMapBounds(pathOverride) {
+  const path = pathOverride ?? MAP_PRIMARY;
+  const mapScene = useGLTF(path);
+  return useMemo(() => {
+    const scene = mapScene.scene;
+    scene.updateMatrixWorld(true);
+    const box = new Box3().setFromObject(scene);
+    const center = box.getCenter(new Vector3());
+    const size = box.getSize(new Vector3());
+    const span = Math.max(size.x, size.z, 0.001);
+    const scale = PLAY_AREA_SIZE / span;
+    const worldSizeX = scale * size.x;
+    const worldSizeZ = scale * size.z;
+    return { worldSizeX, worldSizeZ };
+  }, [mapScene.scene, path]);
+}
+
 class MapErrorBoundary extends Component {
   state = { failed: false };
   static getDerivedStateFromError() {
@@ -11,7 +36,7 @@ class MapErrorBoundary extends Component {
   }
   render() {
     if (this.state.failed) {
-      return <Map path={MAP_FALLBACK} onReady={this.props.onReady} />;
+      return <MapVisualInner path={MAP_FALLBACK} />;
     }
     return this.props.children;
   }
@@ -21,25 +46,23 @@ const BASE = import.meta.env.BASE_URL;
 const MAP_PRIMARY = `${BASE}map4.glb`;
 const MAP_FALLBACK = `${BASE}map.glb`;
 
-/** Play area width (X/Z) so we scale the arena to match. Must match weapons.js MAP_BOUNDS. */
-const PLAY_AREA_SIZE = 90; // MAP_BOUNDS.maxX - MAP_BOUNDS.minX
+const PLAY_AREA_SIZE = 90;
 
-/** @param {{ path?: string, onReady?: (opts: { floorY: number }) => void }} props - path: optional override; onReady: called with floor Y in world space so pickups/players can sit on the ground */
-export const Map = ({ path: pathOverride, onReady }) => {
+export const MapVisualInner = ({ path: pathOverride }) => {
   const path = pathOverride ?? MAP_PRIMARY;
   const mapScene = useGLTF(path);
 
   useEffect(() => {
     mapScene.scene.traverse((child) => {
       if (child.isMesh) {
+        child.visible = true;
         child.castShadow = true;
         child.receiveShadow = true;
       }
     });
   });
 
-  /* Scale map to play area and compute position so map center is at world (0,0,0). Floor Y = world y of map bottom so objects sit on ground. */
-  const { scale: mapScale, position: mapPosition, floorY } = useMemo(() => {
+  const { scale: mapScale, position: mapPosition } = useMemo(() => {
     mapScene.scene.updateMatrixWorld(true);
     const box = new Box3().setFromObject(mapScene.scene);
     const center = box.getCenter(new Vector3());
@@ -47,9 +70,7 @@ export const Map = ({ path: pathOverride, onReady }) => {
     const span = Math.max(size.x, size.z, 0.001);
     const scale = PLAY_AREA_SIZE / span;
     const position = new Vector3(-center.x * scale, -center.y * scale, -center.z * scale);
-    const floorYWorld = position.y + box.min.y * scale;
-    console.log("[Map]", path.split("/").pop(), "bbox span:", span.toFixed(1), "→ scale:", scale.toFixed(3), "center offset:", position.toArray().map((n) => n.toFixed(1)), "floorY:", floorYWorld.toFixed(2));
-    return { scale, position: [position.x, position.y, position.z], floorY: floorYWorld };
+    return { scale, position: [position.x, position.y, position.z] };
   }, [mapScene.scene, path]);
 
   useEffect(() => {
@@ -57,25 +78,108 @@ export const Map = ({ path: pathOverride, onReady }) => {
   }, [floorY, onReady]);
 
   return (
-    <RigidBody
-      colliders="trimesh"
-      type="fixed"
-      position={mapPosition}
-      scale={mapScale}
-      userData={{
-        type: "map",
-      }}
-    >
+    <group position={mapPosition} scale={mapScale}>
       <primitive object={mapScene.scene} />
-    </RigidBody>
+    </group>
   );
 };
 useGLTF.preload(MAP_PRIMARY);
 useGLTF.preload(MAP_FALLBACK);
 
-/** Map that tries map4.glb first and falls back to map.glb if the primary fails to load. Pass onReady to get floor Y. */
-export const MapWithFallback = ({ onReady }) => (
-  <MapErrorBoundary onReady={onReady}>
-    <Map onReady={onReady} />
+export const MapVisual = () => (
+  <MapErrorBoundary>
+    <MapVisualInner />
   </MapErrorBoundary>
 );
+
+/**
+ * Extract spawn point positions from the GLB scene.
+ * Uses a clone of the scene so positions are in model space (not affected by the map group).
+ * Then applies the same scale/offset as the server (from mesh-only bounding box).
+ * Collects nodes named exactly player_spawn_1 through player_spawn_10 (case-insensitive).
+ */
+export function useSpawnPoints(pathOverride) {
+  const path = pathOverride ?? MAP_PRIMARY;
+  const mapScene = useGLTF(path);
+
+  return useMemo(() => {
+    const scene = mapScene.scene.clone();
+    scene.updateMatrixWorld(true);
+
+    // Build bounding box from mesh geometry only (match server: scale/offset from mesh verts)
+    const box = new Box3();
+    scene.traverse((node) => {
+      if (node.isMesh && node.geometry) {
+        node.geometry.computeBoundingBox();
+        const childBox = node.geometry.boundingBox.clone();
+        childBox.applyMatrix4(node.matrixWorld);
+        box.union(childBox);
+      }
+    });
+
+    const center = box.getCenter(new Vector3());
+    const size = box.getSize(new Vector3());
+    const span = Math.max(size.x, size.z, 0.001);
+    const scale = PLAY_AREA_SIZE / span;
+    const offsetX = -center.x * scale;
+    const offsetY = -center.y * scale;
+    const offsetZ = -center.z * scale;
+
+    // Get spawn positions from clone (scene-local = model space, same as server's raw positions)
+    const points = [];
+    const worldPos = new Vector3();
+    scene.traverse((node) => {
+      const name = (node.name || "").toLowerCase();
+      if (/^player_spawn_(1|2|3|4|5|6|7|8|9|10)$/.test(name)) {
+        node.getWorldPosition(worldPos);
+        points.push({
+          x: worldPos.x * scale + offsetX,
+          y: worldPos.y * scale + offsetY,
+          z: worldPos.z * scale + offsetZ,
+        });
+      }
+    });
+
+    return points;
+  }, [mapScene.scene, path]);
+}
+
+/** Wireframe overlay of the full level mesh (same as server trimesh collider). */
+export function MapLevelDebugColliders({ path: pathOverride }) {
+  const path = pathOverride ?? MAP_PRIMARY;
+  const mapScene = useGLTF(path);
+
+  const { group, position, scale } = useMemo(() => {
+    const scene = mapScene.scene.clone();
+    scene.traverse((child) => {
+      if (child.isMesh) {
+        const wire = new THREE.Mesh(child.geometry, new THREE.MeshBasicMaterial({
+          wireframe: true,
+          color: 0x4444ff,
+        }));
+        wire.matrix.copy(child.matrix);
+        wire.matrixAutoUpdate = false;
+        child.parent.add(wire);
+        child.visible = false;
+      }
+    });
+    scene.updateMatrixWorld(true);
+    const box = new Box3().setFromObject(scene);
+    const center = box.getCenter(new Vector3());
+    const size = box.getSize(new Vector3());
+    const span = Math.max(size.x, size.z, 0.001);
+    const s = PLAY_AREA_SIZE / span;
+    const pos = new Vector3(-center.x * s, -center.y * s, -center.z * s);
+    return {
+      group: scene,
+      position: [pos.x, pos.y, pos.z],
+      scale: s,
+    };
+  }, [mapScene.scene, path]);
+
+  return (
+    <group position={position} scale={scale}>
+      <primitive object={group} />
+    </group>
+  );
+}

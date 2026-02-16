@@ -1,16 +1,18 @@
-import { useEffect } from "react";
+/**
+ * App – refactored to remove client-side Rapier physics.
+ * Physics runs on the server; the client is spectator-only.
+ */
+
 import { Canvas } from "@react-three/fiber";
 import { Bloom, EffectComposer } from "@react-three/postprocessing";
 import { Loader, SoftShadows } from "@react-three/drei";
 import { Suspense } from "react";
-import { Physics } from "@react-three/rapier";
-import { insertCoin } from "playroomkit";
 import { Leaderboard } from "./components/Leaderboard";
 import { LeftPanel } from "./components/LeftPanel";
 import { RightPanel } from "./components/RightPanel";
 import { GameManagerProvider } from "./components/GameManager";
 import { SpectatorCamera } from "./components/SpectatorCamera";
-import { SpectatorExperience } from "./components/SpectatorExperience";
+import { GameSounds } from "./components/GameSounds";
 
 /**
  * Claw Shooter: server-only. Game runs on the server; agents use REST API (or Python scripts).
@@ -26,6 +28,7 @@ function App() {
     <>
       <Loader />
       <GameManagerProvider>
+        <GameSounds />
         <Leaderboard />
         <div className="game-view">
           <LeftPanel />
@@ -36,10 +39,8 @@ function App() {
               <SoftShadows size={42} />
 
               <Suspense>
-                <Physics>
-                  <SpectatorCamera />
-                  <SpectatorExperience />
-                </Physics>
+                <SpectatorCamera />
+                <Experience />
               </Suspense>
 
               <EffectComposer disableNormalPass>

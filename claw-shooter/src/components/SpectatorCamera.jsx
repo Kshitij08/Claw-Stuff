@@ -18,7 +18,7 @@ const FOLLOW_SMOOTH = 12;
 export function SpectatorCamera() {
   const controlsRef = useRef();
   const { camera } = useThree();
-  const { selectedBotId, setSelectedBotId, spectatorMatchState } = useGameManager();
+  const { selectedBotId, setSelectedBotId, spectatorMatchState, mapFloorY } = useGameManager();
   const players = usePlayersList(true);
   const spectatorPlayers = spectatorMatchState?.phase === "active" ? spectatorMatchState.players : [];
   const followPosRef = useRef(new Vector3());
@@ -107,7 +107,7 @@ export function SpectatorCamera() {
       const spectatorBot = spectatorPlayers.find((p) => p.id === selectedBotId);
       if (spectatorBot) {
         bx = spectatorBot.x ?? 0;
-        by = 0;
+        by = mapFloorY ?? 0;
         bz = spectatorBot.z ?? 0;
       } else {
         const bot = players.find((p) => p.id === selectedBotId);

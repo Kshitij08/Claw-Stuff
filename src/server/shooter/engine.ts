@@ -42,6 +42,8 @@ export interface ShooterPlayer {
 export interface ShooterAction {
   angle?: number; // radians
   shoot?: boolean;
+  /** If true, player advances one tick in current angle direction. If omitted/false, player does not move. */
+  move?: boolean;
 }
 
 export interface WeaponPickup {
@@ -235,9 +237,11 @@ export class ShooterEngine {
       }
     }
 
-    // Move alive players
+    // Move alive players only when they have a pending action with move: true
     for (const player of match.players.values()) {
       if (!player.alive) continue;
+      const action = match.pendingActions.get(player.id);
+      if (!action || action.move !== true) continue;
       const speed = MOVEMENT_SPEED * TICK_MS; // units per tick
       player.x += Math.sin(player.angle) * speed;
       player.z += Math.cos(player.angle) * speed;

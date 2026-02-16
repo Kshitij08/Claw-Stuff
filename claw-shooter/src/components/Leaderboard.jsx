@@ -1,11 +1,11 @@
 import { createPortal } from "react-dom";
 import { useState, useEffect } from "react";
 import { useGameManager } from "./GameManager";
+import { io } from "socket.io-client";
 
 const SHOOTER_STATUS_URL = "/api/shooter/status";
 const SHOOTER_SPECTATOR_URL = "/api/shooter/match/spectator";
 const POLL_INTERVAL_MS = 1500;
-const SPECTATOR_POLL_MS = 150;
 
 /** API base for shooter status/spectator. On localhost, if the app is not on port 3000 we use :3000 so the backend is reached without setting env. */
 function getApiBase() {
@@ -64,31 +64,34 @@ export const Leaderboard = () => {
     };
   }, []);
 
-  // When match is active, poll spectator endpoint and drive 3D view
+  // When match is active, use Socket.IO for real-time spectator state (~10 Hz); fallback to one-time fetch if socket unavailable.
   useEffect(() => {
     if (serverStatus?.currentMatch?.phase !== "active") {
       setSpectatorMatchState(null);
       return;
     }
-    let cancelled = false;
     const base = getApiBase();
-    const fetchSpectator = async () => {
-      try {
-        const res = await fetch(`${base}${SHOOTER_SPECTATOR_URL}`);
-        if (!res.ok || cancelled) return;
-        const data = await res.json();
-        if (!cancelled && data.phase === "active") setSpectatorMatchState(data);
-        else if (!cancelled) setSpectatorMatchState(null);
-      } catch {
-        if (!cancelled) setSpectatorMatchState(null);
-      }
-    };
-    fetchSpectator();
-    const interval = setInterval(fetchSpectator, SPECTATOR_POLL_MS);
+    let socket;
+    try {
+      socket = io(base, { transports: ["websocket", "polling"] });
+      socket.on("shooterGameState", (data) => {
+        if (data && data.phase === "active") setSpectatorMatchState(data);
+      });
+      // Initial state: server sends shooterGameState on connect when match is active; fetch once as backup if socket is slow
+      fetch(`${base}${SHOOTER_SPECTATOR_URL}`)
+        .then((res) => res.ok ? res.json() : null)
+        .then((data) => { if (data?.phase === "active") setSpectatorMatchState(data); })
+        .catch(() => {});
+    } catch {
+      // No socket: fallback to single fetch (no polling; status effect will re-run when phase changes)
+      fetch(`${base}${SHOOTER_SPECTATOR_URL}`)
+        .then((res) => res.ok ? res.json() : null)
+        .then((data) => { if (data?.phase === "active") setSpectatorMatchState(data); })
+        .catch(() => {});
+    }
     return () => {
-      cancelled = true;
-      clearInterval(interval);
-      setSpectatorMatchState(null);
+      if (socket) socket.disconnect();
+      // Do not clear spectator state here: state is cleared when phase !== "active" at top of effect.
     };
   }, [serverStatus?.currentMatch?.phase, setSpectatorMatchState]);
 

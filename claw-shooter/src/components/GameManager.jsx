@@ -12,6 +12,8 @@ export function GameManagerProvider({ children }) {
   const [selectedBotId, setSelectedBotId] = useState(null); // null = free cam, string = third-person follow that bot
   /** Server-driven spectator state (when phase === 'active'): { players, pickups, leaderboard, timeRemaining, phase } */
   const [spectatorMatchState, setSpectatorMatchState] = useState(null);
+  /** World Y of map floor from Map onReady; used so spectator pickups/players sit on the ground */
+  const [mapFloorY, setMapFloorY] = useState(0);
   const countdownRef = useRef(null);
   const matchStartTimeRef = useRef(null); // set when phase transitions to "playing"
   const spawnPositionsRef = useRef([]);
@@ -194,6 +196,8 @@ export function GameManagerProvider({ children }) {
     matchStartTimeRef,
     spectatorMatchState,
     setSpectatorMatchState,
+    mapFloorY,
+    setMapFloorY,
   };
 
   return (

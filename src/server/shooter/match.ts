@@ -27,6 +27,32 @@ interface ShooterPlayerInfo {
   apiKey: string;
 }
 
+/** Spectator payload (same shape as GET /api/shooter/match/spectator) for Socket.IO broadcast */
+export type ShooterSpectatorState = {
+  matchId: string;
+  phase: string;
+  tick: number;
+  timeRemaining: number;
+  arena: { width: number; height: number };
+  players: Array<{
+    id: string;
+    name: string;
+    alive: boolean;
+    x: number;
+    z: number;
+    angle: number;
+    health: number;
+    lives: number;
+    weapon: string;
+    ammo: number;
+    kills: number;
+    score: number;
+    characterId?: string;
+  }>;
+  pickups: Array<{ id: string; x: number; z: number; weaponType: string }>;
+  leaderboard: Array<{ id: string; name: string; score: number; kills: number; lives: number; alive: boolean }>;
+};
+
 export class ShooterMatchManager {
   private engine: ShooterEngine;
   private players: Map<string, ShooterPlayerInfo> = new Map();
@@ -38,10 +64,69 @@ export class ShooterMatchManager {
   private resultsTimeout: ReturnType<typeof setTimeout> | null = null;
   private currentMatchStartTime: number = 0;
   private nextMatchStartTime: number = 0;
+  private onStateUpdateCallback: ((state: ShooterSpectatorState) => void) | null = null;
 
   constructor() {
     this.engine = new ShooterEngine();
     this.engine.onMatchEnd((state) => this.handleMatchEnd(state));
+    this.engine.onTick((match) => {
+      if (match.phase === 'active' && this.onStateUpdateCallback) {
+        this.onStateUpdateCallback(this.buildSpectatorPayload(match));
+      }
+    });
+  }
+
+  onStateUpdate(cb: (state: ShooterSpectatorState) => void): void {
+    this.onStateUpdateCallback = cb;
+  }
+
+  private buildSpectatorPayload(match: ShooterMatchState): ShooterSpectatorState {
+    const timeRemaining = Math.max(0, (match.endTime - Date.now()) / 1000);
+    const playersList = Array.from(match.players.values()).map((p) => ({
+      id: p.id,
+      name: p.name,
+      alive: p.alive,
+      x: p.x,
+      z: p.z,
+      angle: p.angle,
+      health: p.health,
+      lives: p.lives,
+      weapon: p.weapon,
+      ammo: p.ammo,
+      kills: p.kills,
+      score: p.score,
+      characterId: p.characterId,
+    }));
+    const leaderboard = Array.from(match.players.values())
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+        score: p.score,
+        kills: p.kills,
+        lives: p.lives,
+        alive: p.alive,
+      }))
+      .sort((a, b) => {
+        if (a.alive !== b.alive) return a.alive ? -1 : 1;
+        if (b.score !== a.score) return b.score - a.score;
+        return b.kills - a.kills;
+      });
+    return {
+      matchId: match.id,
+      phase: match.phase,
+      tick: match.tick,
+      timeRemaining,
+      arena: { width: 90, height: 90 },
+      players: playersList,
+      pickups: match.pickups.filter((p) => !p.taken).map((p) => ({ id: p.id, x: p.x, z: p.z, weaponType: p.weaponType })),
+      leaderboard,
+    };
+  }
+
+  getSpectatorState(): ShooterSpectatorState | null {
+    const match = this.engine.getMatch();
+    if (!match || match.phase !== 'active') return null;
+    return this.buildSpectatorPayload(match);
   }
 
   async start(): Promise<void> {
@@ -352,7 +437,7 @@ export class ShooterMatchManager {
 
   performAction(
     playerId: string,
-    action: { angle?: number; shoot?: boolean }
+    action: { angle?: number; shoot?: boolean; move?: boolean }
   ): { success: boolean; error?: string; message?: string } {
     const match = this.engine.getMatch();
     if (!match) return { success: false, error: 'NO_MATCH', message: 'No active match' };

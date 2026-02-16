@@ -244,10 +244,11 @@ export function createShooterRoutes(shooterMatchManager: ShooterMatchManager): R
       return;
     }
 
-    const body = req.body as { angle?: number; shoot?: boolean };
-    const action: { angle?: number; shoot?: boolean } = {};
+    const body = req.body as { angle?: number; shoot?: boolean; move?: boolean };
+    const action: { angle?: number; shoot?: boolean; move?: boolean } = {};
     if (typeof body.angle === 'number') action.angle = body.angle;
     if (typeof body.shoot === 'boolean') action.shoot = body.shoot;
+    if (typeof body.move === 'boolean') action.move = body.move;
 
     const result = shooterMatchManager.performAction(playerInfo.id, action);
     if (!result.success) {

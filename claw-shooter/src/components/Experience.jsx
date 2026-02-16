@@ -17,6 +17,59 @@ import { useGameManager } from "./GameManager";
 import { CharacterPlayer } from "./CharacterPlayer";
 import { useFrame, useThree } from "@react-three/fiber";
 import { Vector3 } from "three";
+
+/** Lerp factor per second for spectator position/rotation (higher = snappier). */
+const SPECTATOR_LERP = 12;
+
+/**
+ * Wraps CharacterPlayer and interpolates position/rotation toward server state each frame
+ * to avoid flicker when spectator updates are infrequent (e.g. production polling).
+ */
+function SpectatorPlayer({ player, mapFloorY }) {
+  const groupRef = useRef(null);
+  const posRef = useRef(new Vector3(player.x, mapFloorY, player.z));
+  const angleRef = useRef(player.angle ?? 0);
+
+  useFrame((_, delta) => {
+    if (!groupRef.current) return;
+    const targetX = player.x;
+    const targetZ = player.z;
+    const targetAngle = player.angle ?? 0;
+
+    // Snap when target jumps (e.g. respawn) so we don't lerp across the arena
+    const dx = targetX - posRef.current.x;
+    const dz = targetZ - posRef.current.z;
+    if (dx * dx + dz * dz > 30 * 30) {
+      posRef.current.set(targetX, mapFloorY, targetZ);
+      angleRef.current = targetAngle;
+    } else {
+      const t = Math.min(1, SPECTATOR_LERP * delta);
+      posRef.current.x += dx * t;
+      posRef.current.y = mapFloorY;
+      posRef.current.z += dz * t;
+
+      let da = targetAngle - angleRef.current;
+      if (da > Math.PI) da -= 2 * Math.PI;
+      if (da < -Math.PI) da += 2 * Math.PI;
+      angleRef.current += da * t;
+    }
+
+    groupRef.current.position.copy(posRef.current);
+    groupRef.current.rotation.y = angleRef.current;
+  });
+
+  return (
+    <group ref={groupRef}>
+      <CharacterPlayer
+        character={player.characterId && /^G_\d+$/.test(player.characterId) ? player.characterId : "G_1"}
+        weapon={player.weapon || "knife"}
+        animation={player.alive ? "Idle" : "Death"}
+        position={[0, 0, 0]}
+        rotation={[0, 0, 0]}
+      />
+    </group>
+  );
+}
 import {
   BOT_NAMES,
   PERSONALITIES,
@@ -56,7 +109,7 @@ export const Experience = ({ downgradedPerformance = false }) => {
   const pickupsSpawnedRef = useRef(false);
   const bgMusicRef = useRef(null);
   const knifeStabRef = useRef(null);
-  const { weaponPickups, takePickup, addWeaponPickup, spawnWeaponPickups, checkWinCondition, gamePhase, getOccupiedBotPositionsRef, spectatorMatchState } =
+  const { weaponPickups, takePickup, addWeaponPickup, spawnWeaponPickups, checkWinCondition, gamePhase, getOccupiedBotPositionsRef, spectatorMatchState, mapFloorY, setMapFloorY } =
     useGameManager();
   const scene = useThree((s) => s.scene);
   const botPositionsRef = useRef([]);
@@ -416,24 +469,17 @@ export const Experience = ({ downgradedPerformance = false }) => {
   return (
     <>
       <BotClickCapture />
-      <MapWithFallback />
-      {/* Server-driven spectator: players and pickups from API */}
+      <MapWithFallback onReady={(opts) => setMapFloorY(opts?.floorY ?? 0)} />
+      {/* Server-driven spectator: players and pickups from API (interpolated to reduce flicker) */}
       {isSpectatorMode && spectatorMatchState.players.map((p) => (
-        <CharacterPlayer
-          key={p.id}
-          character={p.characterId && /^G_\d+$/.test(p.characterId) ? p.characterId : "G_1"}
-          weapon={p.weapon || "knife"}
-          animation={p.alive ? "Idle" : "Death"}
-          position={[p.x, 0, p.z]}
-          rotation={[0, p.angle ?? 0, 0]}
-        />
+        <SpectatorPlayer key={p.id} player={p} mapFloorY={mapFloorY} />
       ))}
       {isSpectatorMode && spectatorMatchState.pickups?.map((p) => (
         <WeaponPickup
           key={p.id}
           id={p.id}
           weaponType={p.weaponType}
-          position={{ x: p.x, y: 0, z: p.z }}
+          position={{ x: p.x, y: mapFloorY, z: p.z }}
           taken={false}
         />
       ))}

@@ -127,6 +127,12 @@ io.on('connection', (socket) => {
     socket.emit('gameState', state);
   }
 
+  // Send current shooter state if match is active (spectator view)
+  const shooterState = shooterMatchManager.getSpectatorState();
+  if (shooterState) {
+    socket.emit('shooterGameState', shooterState);
+  }
+
   // Send server status
   socket.emit('status', matchManager.getStatus());
 
@@ -202,6 +208,15 @@ matchManager.onLobbyOpen((matchId, startsAt) => {
 // Emit updated status whenever something about the lobby/match changes (e.g. players join)
 matchManager.onStatusChange(() => {
   io.emit('status', matchManager.getStatus());
+});
+
+// Shooter: broadcast state on each tick (throttled to ~10 Hz like snake game)
+let shooterTickCounter = 0;
+shooterMatchManager.onStateUpdate((state) => {
+  shooterTickCounter++;
+  if (shooterTickCounter % 2 === 0) {
+    io.volatile.emit('shooterGameState', state);
+  }
 });
 
 // Start server

@@ -156,7 +156,7 @@ export async function runShooterAgent({ key, name }, baseUrl, options = {}) {
       await fetch(`${baseUrl}/api/shooter/match/action`, {
         method: 'POST',
         headers: HEADERS,
-        body: JSON.stringify({ angle: targetAngle, shoot: shouldShoot }),
+        body: JSON.stringify({ angle: targetAngle, shoot: shouldShoot, move: true }),
       });
 
       tickCount++;
@@ -165,7 +165,7 @@ export async function runShooterAgent({ key, name }, baseUrl, options = {}) {
         console.log(`${prefix} [${timeLeft}s] score=${me.score} kills=${me.kills} lives=${me.lives} hp=${me.health}`);
       }
 
-      await sleep(150);
+      await sleep(80);
     } catch (err) {
       if (!quiet) console.error(`${prefix} Error:`, err.message || err);
       await sleep(1000);

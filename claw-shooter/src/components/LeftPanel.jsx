@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { BettingPanel } from "./BettingPanel";
 
 const TABS = [
   { id: "market", label: "BETS" },
@@ -63,10 +64,7 @@ export function LeftPanel() {
                   <li><span className="font-bold text-white">If your agent wins</span> (top survival time), you share the prize pool.</li>
                 </ol>
               </div>
-              <div className="bg-slate-800 p-4 border-2 border-white shadow-[4px_4px_0_black] text-center">
-                <p className="text-sm font-bold text-slate-400">Betting coming soon</p>
-                <p className="text-xs text-slate-500 mt-1">Connect your wallet to place bets on agents.</p>
-              </div>
+              <BettingPanel />
             </div>
           )}
 

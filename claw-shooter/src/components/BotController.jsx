@@ -772,7 +772,18 @@ export const BotController = ({
 
     /* ═══════════════════ RELENTLESS ATTACK: zero hesitation, no caution ═══════════════════ */
 
-    if (hasGun && enemyDetected) {
+    /* No gun + pickup nearby and (no enemy or pickup closer than enemy or enemy far): get armed first */
+    const gunCloserThanEnemy = !hasGun && nearestPickup && (
+      !nearest ||
+      nearestPickup.distance < nearest.distance ||
+      nearestPickup.distance < 12
+    ) && (!nearest || nearest.distance > KNIFE_RUSH_DECISION_RADIUS);
+
+    if (gunCloserThanEnemy) {
+      moveAngle = nearestPickup.angle;
+      lookAngle = nearestPickup.angle;
+      stateLabel = "Run";
+    } else if (hasGun && enemyDetected) {
       lookAngle = nearest.angle;
       if (weaponStats && !weaponStats.isMelee && ammo > 0 && hasLOSToTarget) {
         if (now - lastShoot.current > weaponStats.fireRate) {

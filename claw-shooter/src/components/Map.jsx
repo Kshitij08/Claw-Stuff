@@ -48,7 +48,7 @@ const MAP_FALLBACK = `${BASE}map.glb`;
 
 const PLAY_AREA_SIZE = 90;
 
-export const MapVisualInner = ({ path: pathOverride }) => {
+export const MapVisualInner = ({ path: pathOverride, onReady }) => {
   const path = pathOverride ?? MAP_PRIMARY;
   const mapScene = useGLTF(path);
 
@@ -62,7 +62,7 @@ export const MapVisualInner = ({ path: pathOverride }) => {
     });
   });
 
-  const { scale: mapScale, position: mapPosition } = useMemo(() => {
+  const { scale: mapScale, position: mapPosition, floorY } = useMemo(() => {
     mapScene.scene.updateMatrixWorld(true);
     const box = new Box3().setFromObject(mapScene.scene);
     const center = box.getCenter(new Vector3());
@@ -70,11 +70,12 @@ export const MapVisualInner = ({ path: pathOverride }) => {
     const span = Math.max(size.x, size.z, 0.001);
     const scale = PLAY_AREA_SIZE / span;
     const position = new Vector3(-center.x * scale, -center.y * scale, -center.z * scale);
-    return { scale, position: [position.x, position.y, position.z] };
+    const floorY = position.y - (size.y * 0.5 * scale);
+    return { scale, position: [position.x, position.y, position.z], floorY };
   }, [mapScene.scene, path]);
 
   useEffect(() => {
-    onReady?.( { floorY } );
+    onReady?.({ floorY });
   }, [floorY, onReady]);
 
   return (

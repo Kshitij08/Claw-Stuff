@@ -2,7 +2,10 @@
  * Server-only spectator 3D view. No Playroom – game runs on the server;
  * agents control via REST API (or Python/scripts). This component only renders
  * what the server sends (players, pickups) over Socket.IO / API.
+ *
+ * Uses the same GameManager context as Experience.jsx (gameState, not spectatorMatchState).
  */
+import { useState } from "react";
 import { Environment } from "@react-three/drei";
 import { MapWithFallback } from "./Map";
 import { useGameManager } from "./GameManager";
@@ -10,26 +13,30 @@ import { SpectatorPlayer } from "./SpectatorPlayer";
 import { WeaponPickup } from "./WeaponPickup";
 
 export function SpectatorExperience() {
-  const { spectatorMatchState, mapFloorY, setMapFloorY } = useGameManager();
-  const isActive = spectatorMatchState?.phase === "active" && Array.isArray(spectatorMatchState?.players);
+  const { gameState } = useGameManager();
+  const [mapFloorY, setMapFloorY] = useState(0);
+
+  const players = gameState?.players ?? [];
+  const pickups = gameState?.pickups ?? [];
+  const isActive = gameState?.phase === "active" && players.length >= 0;
 
   return (
     <>
       <MapWithFallback onReady={(opts) => setMapFloorY(opts?.floorY ?? 0)} />
-      {isActive && spectatorMatchState.players.map((p) => (
+      {isActive && players.map((p) => (
         <SpectatorPlayer
           key={p.id}
           player={p}
           mapFloorY={mapFloorY}
-          matchTick={spectatorMatchState.tick}
-          movementSpeed={spectatorMatchState.arena?.movementSpeed}
+          matchTick={gameState?.tick ?? 0}
+          movementSpeed={gameState?.arena?.movementSpeed}
         />
       ))}
-      {isActive && spectatorMatchState.pickups?.map((p) => (
+      {isActive && pickups.map((p) => (
         <WeaponPickup
           key={p.id}
           id={p.id}
-          weaponType={p.weaponType}
+          weaponType={p.type ?? p.weaponType}
           position={{ x: p.x, y: mapFloorY, z: p.z }}
           taken={false}
         />

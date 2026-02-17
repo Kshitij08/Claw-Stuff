@@ -214,6 +214,7 @@ export function GameManagerProvider({ children }) {
     gamePhase,
     shots,
     hits,
+    weaponPickups: gameState?.pickups ?? [],
     selectedBotId,
     setSelectedBotId,
     // Betting

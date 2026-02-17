@@ -53,7 +53,7 @@ export function GameSounds() {
   useEffect(() => {
     const audio = new Audio(BGM_URL);
     audio.loop = true;
-    audio.volume = 0.4;
+    audio.volume = 0.8; // 200% of previous 0.4 (capped at 1.0)
     bgRef.current = audio;
 
     let started = false;

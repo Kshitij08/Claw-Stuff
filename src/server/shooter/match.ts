@@ -45,7 +45,7 @@ import {
   type PersonalityType,
 } from '../../shared/shooter-constants.js';
 import * as bettingService from '../betting/service.js';
-import { recordMatchEnd, recordAgentJoin, ensureMatchExists } from '../db.js';
+import { recordMatchEnd, recordAgentJoin, ensureMatchExists, getHighestShooterMatchId } from '../db.js';
 
 /** Minimum number of total players (AI + API) to start a match. */
 const MIN_PLAYERS_FOR_MATCH = 2;
@@ -62,6 +62,8 @@ export class ShooterMatchManager {
   private lobbyCountdownTimer: NodeJS.Timeout | null = null;
   private resultsTimer: NodeJS.Timeout | null = null;
   private countdownStartsAt = 0;
+  /** When the next lobby opens (set at match end, cleared when lobby opens). Used for getStatus() nextMatch. */
+  private nextLobbyOpensAt = 0;
 
   // Betting state
   private bettingCloseTimeout: NodeJS.Timeout | null = null;
@@ -106,6 +108,14 @@ export class ShooterMatchManager {
 
   async start(): Promise<void> {
     await this.engine.init();
+
+    // Restore match ID counter from database so IDs don't collide after restart
+    try {
+      const highestId = await getHighestShooterMatchId();
+      this.nextMatchId = highestId + 1;
+    } catch {
+      // If DB is unavailable, start from 1
+    }
 
     // Wire engine callbacks
     this.engine.onTick((state) => {
@@ -158,7 +168,11 @@ export class ShooterMatchManager {
   // ── Lobby ─────────────────────────────────────────────────────────
 
   private openLobby(): void {
-    // Clear betting state from previous match
+    // Clear timers from previous match
+    if (this.lobbyCountdownTimer) {
+      clearTimeout(this.lobbyCountdownTimer);
+      this.lobbyCountdownTimer = null;
+    }
     if (this.bettingCloseTimeout) {
       clearTimeout(this.bettingCloseTimeout);
       this.bettingCloseTimeout = null;
@@ -168,6 +182,7 @@ export class ShooterMatchManager {
       this.bettingOpenTimeout = null;
     }
     this.bettingOpenedOnChain = false;
+    this.nextLobbyOpensAt = 0;
 
     const matchId = `shooter_${this.nextMatchId++}`;
     this.engine.createMatch(matchId);
@@ -176,7 +191,7 @@ export class ShooterMatchManager {
     this.countdownStartsAt = 0;
 
     // Ensure the match exists in DB (for betting pool foreign key)
-    ensureMatchExists(matchId).catch(() => {});
+    ensureMatchExists(matchId, 'shooter').catch(() => {});
 
     // Auto-fill with AI bots
     this.fillWithAIBots();
@@ -214,6 +229,14 @@ export class ShooterMatchManager {
       const player = this.engine.addPlayer(botId, botName, undefined, { personality, isAI: true });
       if (player) {
         this.botAI.addBot(botId, personality);
+        // Register bot in DB so they appear in leaderboard and Hall of Fame (and win% in betting panel)
+        recordAgentJoin({
+          agentName: botName,
+          apiKey: `bot:${botName}`,
+          playerId: botId,
+          matchId: match.id,
+          gameType: 'shooter',
+        }).catch(() => {});
       }
     }
 
@@ -239,7 +262,7 @@ export class ShooterMatchManager {
       if (this.bettingOpenTimeout) clearTimeout(this.bettingOpenTimeout);
 
       // Update DB + emit immediately so the UI shows all agents right away
-      bettingService.openBettingForMatch(match.id, allPlayerNames, false).catch(() => {});
+      bettingService.openBettingForMatch(match.id, allPlayerNames, false, 'shooter').catch(() => {});
 
       this.bettingOpenTimeout = setTimeout(() => {
         this.bettingOpenTimeout = null;
@@ -252,7 +275,7 @@ export class ShooterMatchManager {
           return rp?.agentInfo.name ?? p.name;
         });
         // Update DB with final list, then send single on-chain tx
-        bettingService.openBettingForMatch(finalMatch.id, finalNames, true).catch(() => {});
+        bettingService.openBettingForMatch(finalMatch.id, finalNames, true, 'shooter').catch(() => {});
       }, DEBOUNCE_MS);
     } else {
       // openBetting already sent on-chain – add this agent via addAgents
@@ -372,6 +395,7 @@ export class ShooterMatchManager {
       playerId,
       matchId: match.id,
       strategyTag,
+      gameType: 'shooter',
     }).catch(() => {});
 
     // If this is the 2nd player in lobby, start countdown
@@ -414,35 +438,43 @@ export class ShooterMatchManager {
     this.onLobbyOpenCallback?.(match.id, this.countdownStartsAt);
     this.onStatusChangeCallback?.();
 
-    // Close betting 10s before match starts
+    // Close betting 10s before match starts (capture match id so we close the right pool if match is replaced)
+    const closeBettingMatchId = match.id;
     if (LOBBY_COUNTDOWN_MS > BETTING_CLOSE_BUFFER) {
       if (this.bettingCloseTimeout) clearTimeout(this.bettingCloseTimeout);
       this.bettingCloseTimeout = setTimeout(() => {
         this.bettingCloseTimeout = null;
         const m = this.engine.getMatch();
-        if (m) bettingService.closeBettingForMatch(m.id).catch(() => {});
+        if (m && m.id === closeBettingMatchId) bettingService.closeBettingForMatch(m.id).catch(() => {});
       }, LOBBY_COUNTDOWN_MS - BETTING_CLOSE_BUFFER);
     }
 
+    const countdownMatchId = match.id;
     this.lobbyCountdownTimer = setTimeout(() => {
       this.lobbyCountdownTimer = null;
+
+      // Re-fetch match at fire time; if it was replaced (e.g. new lobby), don't start the old one
+      const currentMatch = this.engine.getMatch();
+      if (!currentMatch || currentMatch.id !== countdownMatchId) {
+        return;
+      }
 
       // If debounced betting open hasn't fired yet, fire it now
       if (this.bettingOpenTimeout) {
         clearTimeout(this.bettingOpenTimeout);
         this.bettingOpenTimeout = null;
       }
-      if (!this.bettingOpenedOnChain && match.players.size >= MIN_PLAYERS_FOR_MATCH) {
+      if (!this.bettingOpenedOnChain && currentMatch.players.size >= MIN_PLAYERS_FOR_MATCH) {
         this.bettingOpenedOnChain = true;
-        const allNames = Array.from(match.players.values()).map(p => {
+        const allNames = Array.from(currentMatch.players.values()).map(p => {
           const rp = this.registeredPlayers.get(p.id);
           return rp?.agentInfo.name ?? p.name;
         });
-        bettingService.openBettingForMatch(match.id, allNames, true).catch(() => {});
+        bettingService.openBettingForMatch(currentMatch.id, allNames, true, 'shooter').catch(() => {});
       }
 
       // Close betting as safety net (idempotent)
-      bettingService.closeBettingForMatch(match.id).catch(() => {});
+      bettingService.closeBettingForMatch(currentMatch.id).catch(() => {});
       if (this.bettingCloseTimeout) {
         clearTimeout(this.bettingCloseTimeout);
         this.bettingCloseTimeout = null;
@@ -478,11 +510,12 @@ export class ShooterMatchManager {
 
     const winnerAgentName = winner ? (displayNameToAgent.get(winner.name) ?? winner.name) : null;
 
-    // Build final scores for DB
+    // Build final scores for DB (score = kills for shooter; include deaths for KDA)
     const finalScoresForDb = leaderboard.map(entry => ({
       agentName: displayNameToAgent.get(entry.name) ?? entry.name,
       score: entry.kills,
       kills: entry.kills,
+      deaths: entry.deaths ?? 0,
     }));
 
     const result: ShooterSpectatorMatchEnd = {
@@ -509,6 +542,7 @@ export class ShooterMatchManager {
       winnerAgentName,
       endedAt: Date.now(),
       finalScores: finalScoresForDb,
+      gameType: 'shooter',
     }).catch(() => {});
 
     // ── Resolve betting ────────────────────────────────────────────────
@@ -535,6 +569,8 @@ export class ShooterMatchManager {
         isDraw,
       }).catch(err => console.error('[ShooterMatchManager] resolveMatchBetting failed:', err));
     }).catch(() => {});
+
+    this.nextLobbyOpensAt = Date.now() + RESULTS_DURATION_MS;
 
     // Open next lobby after results display
     this.resultsTimer = setTimeout(() => {
@@ -574,6 +610,20 @@ export class ShooterMatchManager {
     const match = this.engine.getMatch();
     const now = Date.now();
 
+    // Next match: lobby opens after current match ends + results duration; match starts after lobby countdown
+    let nextLobbyOpensAt = 0;
+    let nextStartsAt = 0;
+    if (match) {
+      const currentMatchEndsAt = match.phase === 'active'
+        ? match.endTime
+        : this.countdownStartsAt + MATCH_DURATION_MS;
+      nextLobbyOpensAt = currentMatchEndsAt + RESULTS_DURATION_MS;
+      nextStartsAt = nextLobbyOpensAt + LOBBY_COUNTDOWN_MS;
+    } else if (this.nextLobbyOpensAt > 0) {
+      nextLobbyOpensAt = this.nextLobbyOpensAt;
+      nextStartsAt = nextLobbyOpensAt + LOBBY_COUNTDOWN_MS;
+    }
+
     return {
       serverTime: now,
       currentMatch: match
@@ -588,8 +638,8 @@ export class ShooterMatchManager {
         : null,
       nextMatch: {
         id: `shooter_${this.nextMatchId}`,
-        lobbyOpensAt: 0,
-        startsAt: 0,
+        lobbyOpensAt: nextLobbyOpensAt,
+        startsAt: nextStartsAt,
       },
     };
   }

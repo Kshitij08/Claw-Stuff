@@ -184,10 +184,6 @@ export class BotBrain {
       }
     }
 
-    const hasLOS = target
-      ? engine.hasLineOfSight(player.x, player.z, target.x, target.z, this.playerId)
-      : false;
-
     // Update engagement tracking (don't switch target here; we only switch when target is dead or in melee range)
     if (target) {
       if (this.engagement.targetId === target.id) {
@@ -684,9 +680,7 @@ export class BotBrain {
         this.recovery.active = false;
       }
     }
-    this.lastStuckPos = { x: player.x, z: player.z };
-
-    // Check if clearly not stuck
+    // Check if clearly not stuck (compare to PREVIOUS lastStuckPos before updating)
     if (this.lastStuckPos) {
       const dx = player.x - this.lastStuckPos.x;
       const dz = player.z - this.lastStuckPos.z;
@@ -694,6 +688,7 @@ export class BotBrain {
         this.stuckConsecutiveCount = 0;
       }
     }
+    this.lastStuckPos = { x: player.x, z: player.z };
 
     if (this.stuckAccumMs >= BOT_STUCK_TIME_THRESHOLD_MS && !this.recovery.active) {
       // Switch to another target if stuck with current one

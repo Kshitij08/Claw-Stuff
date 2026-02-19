@@ -60,7 +60,7 @@ export const MapVisualInner = ({ path: pathOverride, onReady }) => {
         child.receiveShadow = true;
       }
     });
-  });
+  }, [mapScene.scene]);
 
   const { scale: mapScale, position: mapPosition, floorY } = useMemo(() => {
     mapScene.scene.updateMatrixWorld(true);

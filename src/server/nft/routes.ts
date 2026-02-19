@@ -186,6 +186,28 @@ export function createNftRoutes(): Router {
       return;
     }
 
+    // Atomically claim the challenge to prevent double-mint (TOCTOU fix)
+    let claimed: { id: string }[];
+    try {
+      claimed = await dbQuery(
+        `UPDATE nft_challenges SET used = true WHERE id = $1 AND used = false RETURNING id`,
+        [challengeId]
+      );
+    } catch (err) {
+      console.error('[nft] atomic challenge claim failed:', err);
+      res.status(500).json({ success: false, error: 'INTERNAL_ERROR', message: 'Database error' });
+      return;
+    }
+
+    if (claimed.length === 0) {
+      res.status(400).json({
+        success: false,
+        error: 'CHALLENGE_USED',
+        message: 'This challenge was already used',
+      });
+      return;
+    }
+
     const result = await operatorMint(walletAddress);
     if (!result) {
       res.status(503).json({
@@ -197,7 +219,6 @@ export function createNftRoutes(): Router {
     }
 
     try {
-      await dbQuery(`UPDATE nft_challenges SET used = true WHERE id = $1`, [challengeId]);
       await dbQuery(
         `INSERT INTO nft_mints (wallet_address, token_id, tx_hash) VALUES ($1, $2, $3)`,
         [wallet, result.tokenId, result.txHash]

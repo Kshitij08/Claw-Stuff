@@ -33,11 +33,9 @@ export function createDroppedFood(position: Point): Food {
   // Add slight randomization to position so dropped food spreads out
   const offsetX = (Math.random() - 0.5) * 20;
   const offsetY = (Math.random() - 0.5) * 20;
-  return createFood(
-    position.x + offsetX,
-    position.y + offsetY,
-    DROPPED_FOOD_VALUE
-  );
+  const clampedX = Math.max(0, Math.min(ARENA_WIDTH, position.x + offsetX));
+  const clampedY = Math.max(0, Math.min(ARENA_HEIGHT, position.y + offsetY));
+  return createFood(clampedX, clampedY, DROPPED_FOOD_VALUE);
 }
 
 export function spawnInitialFood(): Food[] {

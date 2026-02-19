@@ -159,7 +159,7 @@ export class MatchManager {
       if (this.bettingOpenTimeout) clearTimeout(this.bettingOpenTimeout);
 
       // Update DB + emit immediately so the UI shows all agents right away
-      bettingService.openBettingForMatch(match.id, allAgentNames, false).catch(() => {});
+      bettingService.openBettingForMatch(match.id, allAgentNames, false, 'snake').catch(() => {});
 
       this.bettingOpenTimeout = setTimeout(() => {
         this.bettingOpenTimeout = null;
@@ -172,7 +172,7 @@ export class MatchManager {
           return p?.agentInfo.name ?? s.name;
         });
         // Update DB with final list, then send single on-chain tx
-        bettingService.openBettingForMatch(finalMatch.id, finalNames, true).catch(() => {});
+        bettingService.openBettingForMatch(finalMatch.id, finalNames, true, 'snake').catch(() => {});
       }, DEBOUNCE_MS);
     } else {
       // openBetting already sent on-chain – add this agent via addAgents
@@ -195,7 +195,7 @@ export class MatchManager {
         const p = this.players.get(s.id);
         return p?.agentInfo.name ?? s.name;
       });
-      bettingService.openBettingForMatch(match.id, allNames, true).catch(() => {});
+      bettingService.openBettingForMatch(match.id, allNames, true, 'snake').catch(() => {});
     }
 
     // Close betting if it wasn't already closed by the early timeout
@@ -214,12 +214,12 @@ export class MatchManager {
     const match = this.engine.getMatch();
     if (!match) return;
 
-    // Rank by survival time first; if 2+ survived to the end, tiebreak by score/length
-    const matchDurationMs = (match.actualEndTime ?? match.endTime) - match.startTime;
+    // Rank by survival time first (tick-based for consistency); if 2+ survived to the end, tiebreak by score/length
+    const endTick = match.endTick ?? match.tick;
     const withSurvival = Array.from(match.snakes.values())
       .map(s => {
         const survivalMs = s.alive
-          ? matchDurationMs
+          ? endTick * TICK_INTERVAL
           : (s.deathTick ?? 0) * TICK_INTERVAL;
         return { name: s.name, score: s.score, kills: s.kills ?? 0, survivalMs };
       })
@@ -255,19 +255,21 @@ export class MatchManager {
       survivalMs: entry.survivalMs + (i === 0 ? WINNER_SURVIVAL_BONUS_MS : 0),
     }));
 
-    // Update all-time stats
+    // Update all-time stats (keyed on canonical agent name, not display name)
     if (winner) {
-      const stats = this.allTimeStats.get(winner.name) || { wins: 0, totalScore: 0 };
+      const winnerCanonical = displayNameToAgent.get(winner.name) ?? winner.name;
+      const stats = this.allTimeStats.get(winnerCanonical) || { wins: 0, totalScore: 0 };
       stats.wins++;
       stats.totalScore += winner.score;
-      this.allTimeStats.set(winner.name, stats);
+      this.allTimeStats.set(winnerCanonical, stats);
     }
 
     for (const snake of match.snakes.values()) {
       if (snake.name !== winner?.name) {
-        const stats = this.allTimeStats.get(snake.name) || { wins: 0, totalScore: 0 };
+        const canonical = displayNameToAgent.get(snake.name) ?? snake.name;
+        const stats = this.allTimeStats.get(canonical) || { wins: 0, totalScore: 0 };
         stats.totalScore += snake.score;
-        this.allTimeStats.set(snake.name, stats);
+        this.allTimeStats.set(canonical, stats);
       }
     }
 
@@ -339,11 +341,12 @@ export class MatchManager {
           winnerWithSkin = { ...winnerWithSkin, bodyId: parts.bodyId, eyesId: parts.eyesId, mouthId: parts.mouthId };
         }
       }
+      const estimatedNextStart = endedAt + RESULTS_DURATION + EFFECTIVE_LOBBY_DURATION;
       this.onMatchEndCallback({
         matchId: match.id,
         winner: winnerWithSkin,
         finalScores: finalScoresForSpectators,
-        nextMatchStartsAt: this.nextMatchStartTime,
+        nextMatchStartsAt: estimatedNextStart,
       });
     }
 

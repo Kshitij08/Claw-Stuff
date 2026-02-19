@@ -106,7 +106,7 @@ export function BettingPanel() {
 
     const fetchBetting = async () => {
       try {
-        const res = await fetch(`${apiBase}/api/betting/status/${encodeURIComponent(matchId)}?token=${currentToken}`);
+        const res = await fetch(`${apiBase}/api/betting/status/${encodeURIComponent(matchId)}?token=${currentToken}&game=shooter`);
         const data = await res.json();
         if (!cancelled) setBettingStatus(data);
       } catch {
@@ -149,7 +149,7 @@ export function BettingPanel() {
       }
     };
     connect(false);
-    window.ethereum.on("accountsChanged", (accounts) => {
+    const handleAccountsChanged = (accounts) => {
       if (!accounts?.length) {
         setWalletAddress(null);
         setSigner(null);
@@ -158,8 +158,11 @@ export function BettingPanel() {
       } else {
         connect(false);
       }
-    });
-    return () => {};
+    };
+    window.ethereum.on("accountsChanged", handleAccountsChanged);
+    return () => {
+      window.ethereum.removeListener("accountsChanged", handleAccountsChanged);
+    };
   }, []);
 
   // Build contract instance when we have signer + address + ABI
@@ -269,7 +272,7 @@ export function BettingPanel() {
         console.warn("Socket notify failed", e);
       }
       // Refresh status
-      const res = await fetch(`${apiBase}/api/betting/status/${encodeURIComponent(matchId)}?token=${currentToken}`);
+      const res = await fetch(`${apiBase}/api/betting/status/${encodeURIComponent(matchId)}?token=${currentToken}&game=shooter`);
       const data = await res.json();
       setBettingStatus(data);
     } catch (err) {

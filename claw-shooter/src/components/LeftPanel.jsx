@@ -165,7 +165,7 @@ export function LeftPanel() {
 
   async function fetchBettingStatus(matchId) {
     try {
-      const res = await fetch(`/api/betting/status/${matchId}?token=${encodeURIComponent(currentBetToken)}`);
+      const res = await fetch(`/api/betting/status/${matchId}?token=${encodeURIComponent(currentBetToken)}&game=shooter`);
       const data = await res.json();
       setBettingStatus(data);
     } catch (err) {
@@ -376,7 +376,7 @@ export function LeftPanel() {
   async function fetchMyBets() {
     if (!walletAddress) return;
     try {
-      const res = await fetch(`/api/betting/bets-by-wallet/${walletAddress}`);
+      const res = await fetch(`/api/betting/bets-by-wallet/${walletAddress}?game=shooter`);
       const data = await res.json();
       setMyBets(data);
     } catch (err) {
@@ -393,7 +393,7 @@ export function LeftPanel() {
   // ── Leaderboard ──────────────────────────────────────────────────────
   async function fetchLeaderboard() {
     try {
-      const res = await fetch(`/api/betting/leaderboard?token=${encodeURIComponent(currentBetToken)}`);
+      const res = await fetch(`/api/betting/leaderboard?token=${encodeURIComponent(currentBetToken)}&game=shooter`);
       const data = await res.json();
       setLeaderboard(data.leaderboard || []);
     } catch (err) {
@@ -463,7 +463,7 @@ export function LeftPanel() {
   return (
     <>
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
-      <aside className="w-full md:w-80 lg:w-96 flex flex-col z-20 gap-4 flex-shrink-0 order-1">
+      <aside className="w-full md:w-96 lg:w-[32rem] flex flex-col z-20 gap-4 flex-shrink-0 order-1">
         {/* Header */}
         <div className="neo-card p-4 shrink-0 bg-slate-800 flex flex-col gap-3">
           <div className="flex items-center justify-between gap-2">
@@ -479,6 +479,17 @@ export function LeftPanel() {
               CLAW <span className="text-[#d946ef]">SHOOTER</span>
             </h1>
           </div>
+          <div className="flex gap-2">
+            <a href="https://x.com/ClawIODotFun" target="_blank" rel="noopener noreferrer" className="flex-1 btn-neo bg-black text-white border-white hover:bg-slate-800 justify-center h-10 flex items-center justify-center" title="Twitter / X">
+              <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+            </a>
+            <a href="https://discord.gg/mU9ys5VQMY" target="_blank" rel="noopener noreferrer" className="flex-1 btn-neo bg-[#5865F2] text-white border-white hover:brightness-110 justify-center h-10 flex items-center justify-center" title="Discord">
+              <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.419-2.1568 2.419zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.419-2.1568 2.419z"/></svg>
+            </a>
+            <a href="https://farcaster.xyz/clawio" target="_blank" rel="noopener noreferrer" className="flex-1 btn-neo bg-[#855DCD] text-white border-white hover:brightness-110 justify-center h-10 flex items-center justify-center hidden md:flex" title="Farcaster">
+              <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M18.24.24H5.76C2.5789.24 0 2.8188 0 6v12c0 3.1811 2.5789 5.76 5.76 5.76h12.48c3.1812 0 5.76-2.5789 5.76-5.76V6C24 2.8188 21.4212.24 18.24.24m.8155 17.1662v.504c.2868-.0256.5458.1905.5439.479v.5688h-5.1437v-.5688c-.0019-.2885.2576-.5047.5443-.479v-.504c0-.22.1525-.402.358-.458l-.0095-4.3645c-.1589-1.7366-1.6402-3.0979-3.4435-3.0979-1.8038 0-3.2846 1.3613-3.4435 3.0979l-.0096 4.3578c.2276.0424.5318.2083.5395.4648v.504c.2863-.0256.5457.1905.5438.479v.5688H4.3915v-.5688c-.0019-.2885.2575-.5047.5438-.479v-.504c0-.2529.2011-.4548.4536-.4724v-7.895h-.4905L4.2898 7.008l2.6405-.0005V5.0419h9.9495v1.9656h2.8219l-.6091 2.0314h-.4901v7.8949c.2519.0177.453.2195.453.4724"/></svg>
+            </a>
+          </div>
         </div>
 
         {/* Main panel */}
@@ -489,7 +500,7 @@ export function LeftPanel() {
               <button
                 key={tab.id}
                 type="button"
-                className={`flex-1 py-2 text-xs md:text-sm nav-neo ${activeTab === tab.id ? "active" : ""}`}
+                className={`flex-1 py-2 text-base md:text-lg nav-neo ${activeTab === tab.id ? "active" : ""}`}
                 onClick={() => setActiveTab(tab.id)}
               >
                 {tab.label}
@@ -501,13 +512,22 @@ export function LeftPanel() {
             {/* ── BETS tab ────────────────────────────────────────── */}
             {activeTab === "market" && (
               <div className="space-y-3">
+                {/* How betting works */}
+                <div className="bg-slate-900 p-3 border-2 border-white shadow-[4px_4px_0_black] text-base text-slate-200 space-y-1">
+                  <div className="text-sm font-black uppercase text-slate-400 tracking-wider">How betting works</div>
+                  <ol className="list-decimal list-inside space-y-0.5">
+                    <li><span className="font-bold text-white">Pick an agent</span> you believe will win the match.</li>
+                    <li><span className="font-bold text-white">Place a bet</span> in MON or $MClawIO before the match starts.</li>
+                    <li><span className="font-bold text-white">If your agent wins</span>, you share the prize pool with other winning bettors.</li>
+                  </ol>
+                </div>
                 {/* Wallet */}
                 {!walletAddress ? (
-                  <button onClick={connectWallet} className="w-full btn-neo btn-cyan text-sm py-2">
+                  <button onClick={connectWallet} className="w-full btn-neo btn-cyan text-base py-2">
                     Connect Wallet
                   </button>
                 ) : (
-                  <div className="bg-slate-900 p-2 border-2 border-white shadow-[3px_3px_0_black] flex items-center justify-between text-xs">
+                  <div className="bg-slate-900 p-2 border-2 border-white shadow-[3px_3px_0_black] flex items-center justify-between text-base">
                     <div>
                       <span className="font-bold text-[#22d3ee]">{shortenAddr(walletAddress)}</span>
                       {walletBalance != null && (
@@ -523,7 +543,7 @@ export function LeftPanel() {
                       contractRef.current = null;
                       try { localStorage.removeItem("clawio_wallet_address"); } catch (_) {}
                     }}
-                      className="text-[10px] text-slate-500 hover:text-white"
+                      className="text-xs text-slate-500 hover:text-white"
                     >
                       Disconnect
                     </button>
@@ -531,7 +551,7 @@ export function LeftPanel() {
                 )}
 
                 {/* Token selector */}
-                <div className="flex gap-1 bg-[#facc15] border-2 border-white shadow-[2px_2px_0_black] text-[11px] font-black uppercase overflow-hidden">
+                <div className="flex gap-1 bg-[#facc15] border-2 border-white shadow-[2px_2px_0_black] text-sm font-black uppercase overflow-hidden">
                   <button
                     onClick={() => setCurrentBetToken("MON")}
                     className={`flex-1 py-1.5 transition-colors ${currentBetToken === "MON" ? "bg-black text-[#facc15]" : "bg-transparent text-black/60"}`}
@@ -550,12 +570,12 @@ export function LeftPanel() {
                 <div className="bg-[#facc15] p-3 border-2 border-white shadow-[4px_4px_0_black] text-black">
                   <div className="flex items-center justify-between mb-2">
                     <div>
-                      <div className="text-[10px] font-black uppercase opacity-60">Total Pool</div>
-                      <div className="text-xl font-black">{status?.totalPoolMON || "0"} <span className="text-sm">{tokenMeta.symbol}</span></div>
+                      <div className="text-sm font-black uppercase opacity-60">Total Pool</div>
+                      <div className="text-3xl font-black">{status?.totalPoolMON || "0"} <span className="text-lg">{tokenMeta.symbol}</span></div>
                     </div>
                     <div className="text-right">
-                      <span className="inline-block px-2 py-0.5 bg-black text-[#facc15] text-[10px] font-black uppercase">{phaseLabel}</span>
-                      <div className="text-[10px] font-bold mt-0.5 opacity-60">{status?.bettorCount || 0} bettors</div>
+                      <span className="inline-block px-2 py-0.5 bg-black text-[#facc15] text-sm font-black uppercase">{phaseLabel}</span>
+                      <div className="text-sm font-bold mt-0.5 opacity-60">{status?.bettorCount || 0} bettors</div>
                     </div>
                   </div>
                   {/* Pool bar */}
@@ -579,7 +599,7 @@ export function LeftPanel() {
                     <button
                       key={st.id}
                       onClick={() => setBetSubTab(st.id)}
-                      className={`flex-1 py-1.5 text-[10px] font-black uppercase border-2 transition-colors ${
+                      className={`flex-1 py-2 text-sm font-black uppercase border-2 transition-colors ${
                         betSubTab === st.id
                           ? "bg-[#d946ef] text-white border-white"
                           : "bg-slate-700 text-slate-300 border-slate-600 hover:border-white"
@@ -594,7 +614,7 @@ export function LeftPanel() {
                 {betSubTab === "agents" && (
                   <div className="space-y-2">
                     {!status?.agents?.length ? (
-                      <div className="text-center text-sm font-bold text-slate-400 py-10 bg-slate-800 border-2 border-dashed border-slate-600">
+                      <div className="text-center text-base font-bold text-slate-400 py-10 bg-slate-800 border-2 border-dashed border-slate-600">
                         Waiting for players...
                       </div>
                     ) : (
@@ -604,7 +624,7 @@ export function LeftPanel() {
                         const multiplierText = agent.multiplier > 0 ? agent.multiplier.toFixed(2) + "x" : "--";
                         const winRateText = typeof agent.winRate === "number"
                           ? `${(agent.winRate * 100).toFixed(1)}% win`
-                          : "win% --";
+                          : "—";
                         const inputVal = betInputs[agent.agentName] || "";
                         const payout = getEstimatedPayout(agent, inputVal);
 
@@ -614,22 +634,22 @@ export function LeftPanel() {
                               <div className="flex items-center gap-2">
                                 <div className="w-4 h-4 border-2 border-white" style={{ background: color }} />
                                 <div className="flex flex-col">
-                                  <span className="text-sm font-black text-white uppercase">{agent.agentName}</span>
-                                  <span className="text-[10px] font-bold text-slate-400 leading-tight">{winRateText}</span>
+                                  <span className="text-lg font-black text-white uppercase">{agent.agentName}</span>
+                                  <span className="text-sm font-bold text-slate-400 leading-tight">{winRateText}</span>
                                 </div>
                               </div>
                               <div className="text-right" title="Payout multiplier">
-                                <div className="text-[9px] font-bold text-slate-400 uppercase">Payout</div>
-                                <span className="text-lg neo-font" style={{ color }}>{multiplierText}</span>
+                                <div className="text-sm font-bold text-slate-400 uppercase">Payout</div>
+                                <span className="text-xl neo-font" style={{ color }}>{multiplierText}</span>
                               </div>
                             </div>
                             <div className="flex items-center gap-2 mb-2">
                               <div className="flex-1 h-2 bg-slate-900 border border-white/20 overflow-hidden">
                                 <div className="h-full" style={{ width: `${Math.max(agent.percentage, 1)}%`, background: color }} />
                               </div>
-                              <span className="text-[10px] font-bold text-slate-400 w-12 text-right">{agent.percentage.toFixed(1)}%</span>
+                              <span className="text-sm font-bold text-slate-400 w-12 text-right">{agent.percentage.toFixed(1)}%</span>
                             </div>
-                            <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold mb-2">
+                            <div className="flex items-center justify-between text-sm text-slate-400 font-bold mb-2">
                               <span>{agent.poolMON} {tokenMeta.symbol} pooled</span>
                               <span>{agent.bettorCount} bettor{agent.bettorCount !== 1 ? "s" : ""}</span>
                             </div>
@@ -643,19 +663,19 @@ export function LeftPanel() {
                                     placeholder={tokenMeta.symbol}
                                     value={inputVal}
                                     onChange={(e) => setBetInputs((prev) => ({ ...prev, [agent.agentName]: e.target.value }))}
-                                    className="flex-1 bg-slate-900 border-2 border-white text-white text-sm px-2 py-1.5 font-mono focus:border-[#facc15] outline-none"
+                                    className="flex-1 bg-slate-900 border-2 border-white text-white text-base px-2 py-1.5 font-mono focus:border-[#facc15] outline-none"
                                     style={{ maxWidth: 100 }}
                                   />
                                   <button
                                     onClick={() => placeBet(agent.agentName)}
-                                    className="flex-1 py-1.5 text-xs font-black uppercase border-2 border-white text-black shadow-[2px_2px_0_black] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_black] transition-all"
+                                    className="flex-1 py-1.5 text-sm font-black uppercase border-2 border-white text-black shadow-[2px_2px_0_black] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_black] transition-all"
                                     style={{ background: color }}
                                   >
                                     Bet
                                   </button>
                                 </div>
                                 {payout && (
-                                  <div className="text-[10px] font-bold text-slate-300">
+                                  <div className="text-xs font-bold text-slate-300">
                                     If this bot wins: ~{payout} {tokenMeta.symbol} back (after fees)
                                   </div>
                                 )}
@@ -672,11 +692,11 @@ export function LeftPanel() {
                 {betSubTab === "mybets" && (
                   <div className="space-y-2">
                     {!walletAddress ? (
-                      <div className="text-center text-sm font-bold text-slate-400 py-8 bg-slate-800 border-2 border-dashed border-slate-600">
+                      <div className="text-center text-base font-bold text-slate-400 py-8 bg-slate-800 border-2 border-dashed border-slate-600">
                         Connect wallet to see your bets
                       </div>
                     ) : !myBets ? (
-                      <div className="text-center text-sm text-slate-400 py-4">Loading...</div>
+                      <div className="text-center text-base text-slate-400 py-4">Loading...</div>
                     ) : (
                       <>
                         {myBets.statsByToken?.[currentBetToken] && (() => {
@@ -691,21 +711,21 @@ export function LeftPanel() {
                             <>
                               <div className="grid grid-cols-3 gap-2">
                                 <div className="bg-slate-800 border-2 border-white p-2 text-center">
-                                  <div className="text-[9px] font-bold text-slate-400 uppercase">Total Bet</div>
-                                  <div className="text-sm font-black text-[#facc15]">{weiToMON(totalBetWei.toString())} {tokenMeta.symbol}</div>
+                                  <div className="text-xs font-bold text-slate-400 uppercase">Total Bet</div>
+                                  <div className="text-base font-black text-[#facc15]">{weiToMON(totalBetWei.toString())} {tokenMeta.symbol}</div>
                                 </div>
                                 <div className="bg-slate-800 border-2 border-white p-2 text-center">
-                                  <div className="text-[9px] font-bold text-slate-400 uppercase">Total Won</div>
-                                  <div className="text-sm font-black text-[#22d3ee]">{weiToMON(totalPayoutWei.toString())} {tokenMeta.symbol}</div>
+                                  <div className="text-xs font-bold text-slate-400 uppercase">Total Won</div>
+                                  <div className="text-base font-black text-[#22d3ee]">{weiToMON(totalPayoutWei.toString())} {tokenMeta.symbol}</div>
                                 </div>
                                 <div className="bg-slate-800 border-2 border-white p-2 text-center">
-                                  <div className="text-[9px] font-bold text-slate-400 uppercase">P&L</div>
-                                  <div className="text-sm font-black" style={{ color: plColor }}>
+                                  <div className="text-xs font-bold text-slate-400 uppercase">P&L</div>
+                                  <div className="text-base font-black" style={{ color: plColor }}>
                                     {plSign}{weiToMON(plAbs.toString())} {tokenMeta.symbol}
                                   </div>
                                 </div>
                               </div>
-                              <div className="flex gap-3 text-[10px] font-bold text-slate-400">
+                              <div className="flex gap-3 text-xs font-bold text-slate-400">
                                 <span>{stats.totalBets} bets</span>
                                 <span>{stats.totalWins} wins</span>
                                 <span>{stats.matchesPlayed} matches</span>
@@ -717,7 +737,7 @@ export function LeftPanel() {
                           const bets = myBets.betsByToken?.[currentBetToken] || [];
                           if (!bets.length) {
                             return (
-                              <div className="text-center text-sm font-bold text-slate-400 py-8 bg-slate-800 border-2 border-dashed border-slate-600">
+                              <div className="text-center text-base font-bold text-slate-400 py-8 bg-slate-800 border-2 border-dashed border-slate-600">
                                 No bets placed yet
                               </div>
                             );
@@ -725,12 +745,12 @@ export function LeftPanel() {
                           return bets.map((b, i) => (
                             <div key={i} className="bg-slate-800 border-2 border-white p-2 flex items-center justify-between">
                               <div>
-                                <span className="text-xs font-black text-[#facc15] uppercase">{b.agentName}</span>
-                                <span className="text-xs text-slate-400 ml-2">{weiToMON(b.amount)} {tokenMeta.symbol}</span>
+                                <span className="text-sm font-black text-[#facc15] uppercase">{b.agentName}</span>
+                                <span className="text-sm text-slate-400 ml-2">{weiToMON(b.amount)} {tokenMeta.symbol}</span>
                               </div>
                               {b.txHash && (
                                 <a href={`https://monadvision.com/tx/${b.txHash}`} target="_blank" rel="noopener noreferrer"
-                                  className="text-[10px] text-[#22d3ee] font-mono hover:underline"
+                                  className="text-xs text-[#22d3ee] font-mono hover:underline"
                                 >
                                   {b.txHash.slice(0, 8)}...
                                 </a>
@@ -747,7 +767,7 @@ export function LeftPanel() {
                 {betSubTab === "leaders" && (
                   <div className="space-y-2">
                     {!leaderboard || leaderboard.length === 0 ? (
-                      <div className="text-center text-sm font-bold text-slate-400 py-8 bg-slate-800 border-2 border-dashed border-slate-600">
+                      <div className="text-center text-base font-bold text-slate-400 py-8 bg-slate-800 border-2 border-dashed border-slate-600">
                         No bets placed yet
                       </div>
                     ) : (
@@ -757,14 +777,14 @@ export function LeftPanel() {
                         const rc = rankColors[rank] || "#64748b";
                         return (
                           <div key={i} className="bg-slate-800 border-2 border-white p-2 flex items-center gap-3">
-                            <div className="w-6 h-6 flex items-center justify-center font-black text-xs border-2 border-white" style={{ background: rc, color: "black" }}>{rank}</div>
+                            <div className="w-6 h-6 flex items-center justify-center font-black text-sm border-2 border-white" style={{ background: rc, color: "black" }}>{rank}</div>
                             <div className="flex-1 min-w-0">
-                              <div className="text-xs font-black text-white truncate">{e.bettorName || shortenAddr(e.bettorAddress)}</div>
-                              <div className="text-[10px] text-slate-400 font-mono">{shortenAddr(e.bettorAddress)}</div>
+                              <div className="text-sm font-black text-white truncate">{e.bettorName || shortenAddr(e.bettorAddress)}</div>
+                              <div className="text-xs text-slate-400 font-mono">{shortenAddr(e.bettorAddress)}</div>
                             </div>
                             <div className="text-right">
-                              <div className="text-xs font-black text-[#facc15]">{e.totalVolumeMON} {tokenMeta.symbol}</div>
-                              <div className="text-[10px] text-slate-400">{e.totalBets} bets / {e.totalWins} wins</div>
+                              <div className="text-sm font-black text-[#facc15]">{e.totalVolumeMON} {tokenMeta.symbol}</div>
+                              <div className="text-xs text-slate-400">{e.totalBets} bets / {e.totalWins} wins</div>
                             </div>
                           </div>
                         );
@@ -777,7 +797,7 @@ export function LeftPanel() {
                 {betSubTab === "results" && (
                   <div className="space-y-2">
                     {!resultsData || !resultsData.bets?.length ? (
-                      <div className="text-center text-sm font-bold text-slate-400 py-8 bg-slate-800 border-2 border-dashed border-slate-600">
+                      <div className="text-center text-base font-bold text-slate-400 py-8 bg-slate-800 border-2 border-dashed border-slate-600">
                         No betting results yet
                       </div>
                     ) : (() => {
@@ -813,7 +833,7 @@ export function LeftPanel() {
                         return (
                           <div
                             key={i}
-                            className={`bg-slate-800 border-2 border-white p-2 flex items-center justify-between text-[10px] ${
+                            className={`bg-slate-800 border-2 border-white p-2 flex items-center justify-between text-xs ${
                               isWinner ? "shadow-[3px_3px_0_#facc15]" : "shadow-[2px_2px_0_black]"
                             }`}
                           >
@@ -843,30 +863,30 @@ export function LeftPanel() {
                 <div className="bg-slate-800 p-4 border-2 border-white shadow-[4px_4px_0_black]">
                   <div className="flex items-center gap-3 mb-4">
                     <div className="w-12 h-12 rounded-full bg-[#facc15] border-2 border-white flex items-center justify-center">
-                      <span className="text-black font-black text-2xl">$</span>
+                      <span className="text-black font-black text-3xl">$</span>
                     </div>
                     <div>
-                      <h2 className="text-2xl neo-font text-white leading-none tracking-wide">$MClawIO (Monad)</h2>
-                      <span className="text-xs font-bold text-lime-400 bg-lime-400/10 px-2 py-0.5 rounded border border-lime-400/30">-- (24h)</span>
+                      <h2 className="text-3xl neo-font text-white leading-none tracking-wide">$MClawIO (Monad)</h2>
+                      <span className="text-sm font-bold text-lime-400 bg-lime-400/10 px-2 py-0.5 rounded border border-lime-400/30">-- (24h)</span>
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-3 mb-4">
                     <div className="bg-slate-900 p-2 border border-white/20 rounded">
-                      <div className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Market Cap</div>
-                      <div className="text-sm font-mono font-bold text-white">--</div>
+                      <div className="text-xs text-slate-400 uppercase font-bold tracking-wider">Market Cap</div>
+                      <div className="text-base font-mono font-bold text-white">--</div>
                     </div>
                     <div className="bg-slate-900 p-2 border border-white/20 rounded">
-                      <div className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Price</div>
-                      <div className="text-sm font-mono font-bold text-white">--</div>
+                      <div className="text-xs text-slate-400 uppercase font-bold tracking-wider">Price</div>
+                      <div className="text-base font-mono font-bold text-white">--</div>
                     </div>
                   </div>
                   <div className="mb-4">
-                    <div className="text-[10px] text-slate-400 uppercase font-bold mb-1 tracking-wider">Contract Address (Monad CA)</div>
+                    <div className="text-xs text-slate-400 uppercase font-bold mb-1 tracking-wider">Contract Address (Monad CA)</div>
                     <div className="flex gap-2">
                       <button
                         type="button"
                         onClick={copyTokenAddress}
-                        className="flex-1 bg-slate-900 border border-white/20 text-[10px] p-2 font-mono text-slate-300 truncate rounded cursor-pointer hover:bg-slate-800 transition-colors text-left"
+                        className="flex-1 bg-slate-900 border border-white/20 text-xs p-2 font-mono text-slate-300 truncate rounded cursor-pointer hover:bg-slate-800 transition-colors text-left"
                         title="Click to copy"
                       >
                         {TOKEN_CA_SHORT}
@@ -891,11 +911,11 @@ export function LeftPanel() {
                   </a>
                 </div>
                 <div className="p-4 border-2 border-dashed border-white/30 rounded-xl bg-slate-900/50">
-                  <h3 className="text-sm font-black text-[#d946ef] uppercase mb-2 tracking-wide flex items-center gap-2">
+                  <h3 className="text-base font-black text-[#d946ef] uppercase mb-2 tracking-wide flex items-center gap-2">
                     <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
                     Utility
                   </h3>
-                  <p className="text-xs text-slate-300 leading-relaxed font-medium">
+                  <p className="text-sm text-slate-300 leading-relaxed font-medium">
                     Claw IO is powered by <span className="text-[#facc15] font-bold">$MClawIO</span> on Monad. Use tokens for agent skins and betting on live matches.
                   </p>
                 </div>

@@ -163,8 +163,8 @@ export function SpectatorCamera() {
     right.y = 0;
     right.normalize();
     const move = PAN_SPEED * delta;
-    if (keyState.forward) target.addScaledVector(forward, -move);
-    if (keyState.back) target.addScaledVector(forward, move);
+    if (keyState.forward) target.addScaledVector(forward, move);
+    if (keyState.back) target.addScaledVector(forward, -move);
     if (keyState.left) target.addScaledVector(right, -move);
     if (keyState.right) target.addScaledVector(right, move);
   });

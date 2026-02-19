@@ -7,7 +7,7 @@
  */
 import { useState } from "react";
 import { Environment } from "@react-three/drei";
-import { MapWithFallback } from "./Map";
+import { MapVisualInner } from "./Map";
 import { useGameManager } from "./GameManager";
 import { SpectatorPlayer } from "./SpectatorPlayer";
 import { WeaponPickup } from "./WeaponPickup";
@@ -18,11 +18,11 @@ export function SpectatorExperience() {
 
   const players = gameState?.players ?? [];
   const pickups = gameState?.pickups ?? [];
-  const isActive = gameState?.phase === "active" && players.length >= 0;
+  const isActive = gameState?.phase === "active" && players.length > 0;
 
   return (
     <>
-      <MapWithFallback onReady={(opts) => setMapFloorY(opts?.floorY ?? 0)} />
+      <MapVisualInner onReady={(opts) => setMapFloorY(opts?.floorY ?? 0)} />
       {isActive && players.map((p) => (
         <SpectatorPlayer
           key={p.id}

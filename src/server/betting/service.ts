@@ -85,14 +85,14 @@ function weiToMON(wei: string): string {
  * @param sendOnChain – if false, only set DB to 'pending' + emit bettingPending (UI shows agents, no bet yet).
  *                      if true, send openBetting tx on-chain, then set 'open' and emit bettingOpen only after confirm.
  */
-export async function openBettingForMatch(matchId: string, agentNames: string[], sendOnChain: boolean = true) {
+export async function openBettingForMatch(matchId: string, agentNames: string[], sendOnChain: boolean = true, gameType: 'snake' | 'shooter' = 'snake') {
   // Never set DB to 'open' until on-chain openBetting has confirmed (so UI never shows "Bet" too early)
   try {
     await dbQuery(
-      `INSERT INTO betting_pools (match_id, status, agent_names)
-       VALUES ($1, 'pending', $2)
+      `INSERT INTO betting_pools (match_id, status, agent_names, game_type)
+       VALUES ($1, 'pending', $2, $3)
        ON CONFLICT (match_id) DO UPDATE SET status = 'pending', agent_names = $2`,
-      [matchId, agentNames],
+      [matchId, agentNames, gameType],
     );
   } catch (err) {
     console.error('[betting/service] DB openBettingForMatch failed:', err);
@@ -181,6 +181,8 @@ export async function placeBet(opts: {
     txHash,
   } = opts;
 
+  const gameType = matchId.startsWith('shooter_') ? 'shooter' : 'snake';
+
   // Validate pool exists and is in a valid state for recording bets
   const poolRows = await dbQuery<{ status: string }>(
     `SELECT status FROM betting_pools WHERE match_id = $1`,
@@ -224,13 +226,14 @@ export async function placeBet(opts: {
     }
 
     // Update leaderboard
-    await updateLeaderboard(bettorAddress, bettorName, amountWei, token);
+    await updateLeaderboard(bettorAddress, bettorName, amountWei, token, gameType);
   } catch (err) {
     console.error('[betting/service] DB placeBet failed:', err);
+    return { success: false, error: 'DB_ERROR' };
   }
 
   // Emit real-time update
-  const status = await getBettingStatus(matchId, token);
+  const status = await getBettingStatus(matchId, token, gameType);
   emit('bettingUpdate', status);
   emit('betPlaced', {
     matchId,
@@ -351,7 +354,7 @@ export async function resolveMatchBetting(opts: {
   // Check if anyone bet on winners
   const winnerBetsRows = await dbQuery<{ total: string }>(
     `SELECT COALESCE(SUM(amount), 0)::text AS total FROM bets
-     WHERE match_id = $1 AND agent_name = ANY($2)`,
+     WHERE match_id = $1 AND agent_name = ANY($2) AND token = 'MON'`,
     [matchId, winnerAgentNames],
   );
   const combinedWinnerPool = BigInt(winnerBetsRows[0]?.total || '0');
@@ -412,6 +415,8 @@ export async function claimWinnings(
   bettorAddress: string,
   matchId: string,
 ): Promise<{ success: boolean; txHashMon?: string; txHashMclaw?: string; payoutMon?: string; payoutMclaw?: string; error?: string }> {
+  const gameType = matchId.startsWith('shooter_') ? 'shooter' : 'snake';
+
   // Check claimable amounts from contract (MON and MCLAW)
   const { monAmount, mclawAmount } = await chain.getClaimableAmounts(matchId, bettorAddress);
   const hasMon = monAmount !== '0';
@@ -430,16 +435,16 @@ export async function claimWinnings(
     if (txHashMon) {
       try {
         await dbQuery(
-          `INSERT INTO bet_settlements (match_id, bettor_address, payout_amount, claim_tx_hash, token)
-           VALUES ($1, $2, $3, $4, $5)`,
-          [matchId, bettorAddress.toLowerCase(), monAmount, txHashMon, 'MON'],
+          `INSERT INTO bet_settlements (match_id, bettor_address, payout_amount, claim_tx_hash, token, game_type)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [matchId, bettorAddress.toLowerCase(), monAmount, txHashMon, 'MON', gameType],
         );
         await dbQuery(
           `UPDATE betting_leaderboard SET
              total_wins = total_wins + 1,
              total_payout = total_payout + $2
-           WHERE bettor_address = $1`,
-          [bettorAddress.toLowerCase(), monAmount],
+           WHERE bettor_address = $1 AND token = 'MON' AND game_type = $3`,
+          [bettorAddress.toLowerCase(), monAmount, gameType],
         );
       } catch (err) {
         console.error('[betting/service] DB claimWinnings MON failed:', err);
@@ -453,16 +458,16 @@ export async function claimWinnings(
     if (txHashMclaw) {
       try {
         await dbQuery(
-          `INSERT INTO bet_settlements (match_id, bettor_address, payout_amount, claim_tx_hash, token)
-           VALUES ($1, $2, $3, $4, $5)`,
-          [matchId, bettorAddress.toLowerCase(), mclawAmount, txHashMclaw, 'MCLAW'],
+          `INSERT INTO bet_settlements (match_id, bettor_address, payout_amount, claim_tx_hash, token, game_type)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [matchId, bettorAddress.toLowerCase(), mclawAmount, txHashMclaw, 'MCLAW', gameType],
         );
         await dbQuery(
           `UPDATE betting_leaderboard SET
              total_wins = total_wins + 1,
              total_payout = total_payout + $2
-           WHERE bettor_address = $1`,
-          [bettorAddress.toLowerCase(), mclawAmount],
+           WHERE bettor_address = $1 AND token = 'MCLAW' AND game_type = $3`,
+          [bettorAddress.toLowerCase(), mclawAmount, gameType],
         );
       } catch (err) {
         console.error('[betting/service] DB claimWinnings MCLAW failed:', err);
@@ -488,6 +493,8 @@ export async function claimWinnings(
  * Called after resolveMatch – claims on behalf of each winner via the operator wallet.
  */
 async function autoDistributeWinnings(matchId: string, winnerAgentNames: string[]) {
+  const gameType = matchId.startsWith('shooter_') ? 'shooter' : 'snake';
+
   // Get all unique bettor addresses that bet on any winning agent (any token)
   const winningBettors = await dbQuery<{ bettor_address: string }>(
     `SELECT DISTINCT bettor_address FROM bets
@@ -519,16 +526,16 @@ async function autoDistributeWinnings(matchId: string, winnerAgentNames: string[
           console.log(`[betting/service] Auto-claimed ${weiToMON(monAmount)} MON for ${addr} (tx: ${txHashMon})`);
           try {
             await dbQuery(
-              `INSERT INTO bet_settlements (match_id, bettor_address, payout_amount, claim_tx_hash, token)
-               VALUES ($1, $2, $3, $4, $5)`,
-              [matchId, addr, monAmount, txHashMon, 'MON'],
+              `INSERT INTO bet_settlements (match_id, bettor_address, payout_amount, claim_tx_hash, token, game_type)
+               VALUES ($1, $2, $3, $4, $5, $6)`,
+              [matchId, addr, monAmount, txHashMon, 'MON', gameType],
             );
             await dbQuery(
               `UPDATE betting_leaderboard SET
                  total_wins = total_wins + 1,
                  total_payout = total_payout + $2
-               WHERE bettor_address = $1 AND token = 'MON'`,
-              [addr, monAmount],
+               WHERE bettor_address = $1 AND token = 'MON' AND game_type = $3`,
+              [addr, monAmount, gameType],
             );
           } catch (dbErr) {
             console.error(`[betting/service] DB settlement record failed for ${addr} (MON):`, dbErr);
@@ -554,16 +561,16 @@ async function autoDistributeWinnings(matchId: string, winnerAgentNames: string[
           console.log(`[betting/service] Auto-claimed ${weiToMON(mclawAmount)} MCLAW for ${addr} (tx: ${txHashMclaw})`);
           try {
             await dbQuery(
-              `INSERT INTO bet_settlements (match_id, bettor_address, payout_amount, claim_tx_hash, token)
-               VALUES ($1, $2, $3, $4, $5)`,
-              [matchId, addr, mclawAmount, txHashMclaw, 'MCLAW'],
+              `INSERT INTO bet_settlements (match_id, bettor_address, payout_amount, claim_tx_hash, token, game_type)
+               VALUES ($1, $2, $3, $4, $5, $6)`,
+              [matchId, addr, mclawAmount, txHashMclaw, 'MCLAW', gameType],
             );
             await dbQuery(
               `UPDATE betting_leaderboard SET
                  total_wins = total_wins + 1,
                  total_payout = total_payout + $2
-               WHERE bettor_address = $1 AND token = 'MCLAW'`,
-              [addr, mclawAmount],
+               WHERE bettor_address = $1 AND token = 'MCLAW' AND game_type = $3`,
+              [addr, mclawAmount, gameType],
             );
           } catch (dbErr) {
             console.error(`[betting/service] DB settlement record failed for ${addr} (MCLAW):`, dbErr);
@@ -590,7 +597,7 @@ async function autoDistributeWinnings(matchId: string, winnerAgentNames: string[
 /**
  * Get betting status with live odds for each agent.
  */
-export async function getBettingStatus(matchId: string, token: Token = 'MON'): Promise<BettingStatus> {
+export async function getBettingStatus(matchId: string, token: Token = 'MON', gameType?: 'snake' | 'shooter'): Promise<BettingStatus> {
   // agent_names and base status still come from betting_pools (match-level metadata)
   const poolRows = await dbQuery<{ status: string; agent_names: string[] | null }>(
     `SELECT status, agent_names FROM betting_pools WHERE match_id = $1`,
@@ -639,7 +646,7 @@ export async function getBettingStatus(matchId: string, token: Token = 'MON'): P
   // Global leaderboard win rates (matches, wins, winRate per agent)
   const winRateMap = new Map<string, number>();
   try {
-    const leaderboard = await getGlobalLeaderboard();
+    const leaderboard = await getGlobalLeaderboard(gameType ? { game: gameType } : undefined);
     for (const row of leaderboard.leaderboard) {
       winRateMap.set(row.agentName, row.winRate);
     }
@@ -691,6 +698,7 @@ export async function getUserBets(
   bettorAddress: string,
   matchId?: string,
   token?: Token,
+  gameType?: 'snake' | 'shooter',
 ): Promise<BetRecord[]> {
   const addr = bettorAddress.toLowerCase();
   let rows: any[];
@@ -704,6 +712,20 @@ export async function getUserBets(
       rows = await dbQuery(
         `SELECT * FROM bets WHERE bettor_address = $1 AND match_id = $2 ORDER BY placed_at DESC`,
         [addr, matchId],
+      );
+    }
+  } else if (gameType) {
+    if (token) {
+      rows = await dbQuery(
+        `SELECT b.* FROM bets b JOIN betting_pools bp ON bp.match_id = b.match_id
+         WHERE b.bettor_address = $1 AND b.token = $2 AND bp.game_type = $3 ORDER BY b.placed_at DESC LIMIT 100`,
+        [addr, token, gameType],
+      );
+    } else {
+      rows = await dbQuery(
+        `SELECT b.* FROM bets b JOIN betting_pools bp ON bp.match_id = b.match_id
+         WHERE b.bettor_address = $1 AND bp.game_type = $2 ORDER BY b.placed_at DESC LIMIT 100`,
+        [addr, gameType],
       );
     }
   } else {
@@ -738,40 +760,100 @@ export async function getUserBets(
  * Get aggregate stats for a wallet: total bet, total payout, profit/loss, win count.
  * Optionally filtered by token.
  */
-export async function getWalletStats(bettorAddress: string, token?: Token) {
+export async function getWalletStats(bettorAddress: string, token?: Token, gameType?: 'snake' | 'shooter') {
   const addr = bettorAddress.toLowerCase();
 
   // Total wagered
-  const betRows = await dbQuery<{ total: string; cnt: string }>(
-    token
-      ? `SELECT COALESCE(SUM(amount), 0)::text AS total, COUNT(*)::text AS cnt
-         FROM bets WHERE bettor_address = $1 AND token = $2`
-      : `SELECT COALESCE(SUM(amount), 0)::text AS total, COUNT(*)::text AS cnt
-         FROM bets WHERE bettor_address = $1`,
-    token ? [addr, token] : [addr],
-  );
+  let betRows: { total: string; cnt: string }[];
+  if (gameType && token) {
+    betRows = await dbQuery<{ total: string; cnt: string }>(
+      `SELECT COALESCE(SUM(b.amount), 0)::text AS total, COUNT(*)::text AS cnt
+       FROM bets b JOIN betting_pools bp ON bp.match_id = b.match_id
+       WHERE b.bettor_address = $1 AND b.token = $2 AND bp.game_type = $3`,
+      [addr, token, gameType],
+    );
+  } else if (gameType) {
+    betRows = await dbQuery<{ total: string; cnt: string }>(
+      `SELECT COALESCE(SUM(b.amount), 0)::text AS total, COUNT(*)::text AS cnt
+       FROM bets b JOIN betting_pools bp ON bp.match_id = b.match_id
+       WHERE b.bettor_address = $1 AND bp.game_type = $2`,
+      [addr, gameType],
+    );
+  } else if (token) {
+    betRows = await dbQuery<{ total: string; cnt: string }>(
+      `SELECT COALESCE(SUM(amount), 0)::text AS total, COUNT(*)::text AS cnt
+       FROM bets WHERE bettor_address = $1 AND token = $2`,
+      [addr, token],
+    );
+  } else {
+    betRows = await dbQuery<{ total: string; cnt: string }>(
+      `SELECT COALESCE(SUM(amount), 0)::text AS total, COUNT(*)::text AS cnt
+       FROM bets WHERE bettor_address = $1`,
+      [addr],
+    );
+  }
   const totalBetWei = betRows[0]?.total || '0';
   const totalBets = parseInt(betRows[0]?.cnt || '0', 10);
 
   // Total payouts received
-  const payoutRows = await dbQuery<{ total: string; cnt: string }>(
-    token
-      ? `SELECT COALESCE(SUM(payout_amount), 0)::text AS total, COUNT(*)::text AS cnt
-         FROM bet_settlements WHERE bettor_address = $1 AND token = $2`
-      : `SELECT COALESCE(SUM(payout_amount), 0)::text AS total, COUNT(*)::text AS cnt
-         FROM bet_settlements WHERE bettor_address = $1`,
-    token ? [addr, token] : [addr],
-  );
+  let payoutRows: { total: string; cnt: string }[];
+  if (gameType && token) {
+    payoutRows = await dbQuery<{ total: string; cnt: string }>(
+      `SELECT COALESCE(SUM(bs.payout_amount), 0)::text AS total, COUNT(*)::text AS cnt
+       FROM bet_settlements bs JOIN betting_pools bp ON bp.match_id = bs.match_id
+       WHERE bs.bettor_address = $1 AND bs.token = $2 AND bp.game_type = $3`,
+      [addr, token, gameType],
+    );
+  } else if (gameType) {
+    payoutRows = await dbQuery<{ total: string; cnt: string }>(
+      `SELECT COALESCE(SUM(bs.payout_amount), 0)::text AS total, COUNT(*)::text AS cnt
+       FROM bet_settlements bs JOIN betting_pools bp ON bp.match_id = bs.match_id
+       WHERE bs.bettor_address = $1 AND bp.game_type = $2`,
+      [addr, gameType],
+    );
+  } else if (token) {
+    payoutRows = await dbQuery<{ total: string; cnt: string }>(
+      `SELECT COALESCE(SUM(payout_amount), 0)::text AS total, COUNT(*)::text AS cnt
+       FROM bet_settlements WHERE bettor_address = $1 AND token = $2`,
+      [addr, token],
+    );
+  } else {
+    payoutRows = await dbQuery<{ total: string; cnt: string }>(
+      `SELECT COALESCE(SUM(payout_amount), 0)::text AS total, COUNT(*)::text AS cnt
+       FROM bet_settlements WHERE bettor_address = $1`,
+      [addr],
+    );
+  }
   const totalPayoutWei = payoutRows[0]?.total || '0';
   const totalWins = parseInt(payoutRows[0]?.cnt || '0', 10);
 
   // Matches participated in
-  const matchRows = await dbQuery<{ cnt: string }>(
-    token
-      ? `SELECT COUNT(DISTINCT match_id)::text AS cnt FROM bets WHERE bettor_address = $1 AND token = $2`
-      : `SELECT COUNT(DISTINCT match_id)::text AS cnt FROM bets WHERE bettor_address = $1`,
-    token ? [addr, token] : [addr],
-  );
+  let matchRows: { cnt: string }[];
+  if (gameType && token) {
+    matchRows = await dbQuery<{ cnt: string }>(
+      `SELECT COUNT(DISTINCT b.match_id)::text AS cnt
+       FROM bets b JOIN betting_pools bp ON bp.match_id = b.match_id
+       WHERE b.bettor_address = $1 AND b.token = $2 AND bp.game_type = $3`,
+      [addr, token, gameType],
+    );
+  } else if (gameType) {
+    matchRows = await dbQuery<{ cnt: string }>(
+      `SELECT COUNT(DISTINCT b.match_id)::text AS cnt
+       FROM bets b JOIN betting_pools bp ON bp.match_id = b.match_id
+       WHERE b.bettor_address = $1 AND bp.game_type = $2`,
+      [addr, gameType],
+    );
+  } else if (token) {
+    matchRows = await dbQuery<{ cnt: string }>(
+      `SELECT COUNT(DISTINCT match_id)::text AS cnt FROM bets WHERE bettor_address = $1 AND token = $2`,
+      [addr, token],
+    );
+  } else {
+    matchRows = await dbQuery<{ cnt: string }>(
+      `SELECT COUNT(DISTINCT match_id)::text AS cnt FROM bets WHERE bettor_address = $1`,
+      [addr],
+    );
+  }
   const matchesPlayed = parseInt(matchRows[0]?.cnt || '0', 10);
 
   const totalBet = BigInt(totalBetWei);
@@ -817,9 +899,14 @@ export async function getMatchHistory(matchId: string) {
 /**
  * Get global wager totals across all matches, per token (for home page stats).
  */
-export async function getGlobalWagerTotals(): Promise<{ totalWageredMON: string; totalWageredMClaw: string; totalWageredMONFormatted: string; totalWageredMClawFormatted: string }> {
+export async function getGlobalWagerTotals(gameType?: 'snake' | 'shooter'): Promise<{ totalWageredMON: string; totalWageredMClaw: string; totalWageredMONFormatted: string; totalWageredMClawFormatted: string }> {
   const rows = await dbQuery<{ token: string; total: string }>(
-    `SELECT token, COALESCE(SUM(amount), 0)::text AS total FROM bets GROUP BY token`,
+    gameType
+      ? `SELECT b.token, COALESCE(SUM(b.amount), 0)::text AS total
+         FROM bets b JOIN betting_pools bp ON bp.match_id = b.match_id
+         WHERE bp.game_type = $1 GROUP BY b.token`
+      : `SELECT token, COALESCE(SUM(amount), 0)::text AS total FROM bets GROUP BY token`,
+    gameType ? [gameType] : [],
   );
   let monWei = '0';
   let mclawWei = '0';
@@ -838,13 +925,23 @@ export async function getGlobalWagerTotals(): Promise<{ totalWageredMON: string;
 /**
  * Get betting leaderboard ranked by total volume.
  */
-export async function getLeaderboard(limit: number = 50, token?: Token): Promise<LeaderboardEntry[]> {
-  const rows = await dbQuery<any>(
-    token
-      ? `SELECT * FROM betting_leaderboard WHERE token = $2 ORDER BY total_volume DESC LIMIT $1`
-      : `SELECT * FROM betting_leaderboard ORDER BY total_volume DESC LIMIT $1`,
-    token ? [limit, token] : [limit],
-  );
+export async function getLeaderboard(limit: number = 50, token?: Token, gameType?: 'snake' | 'shooter'): Promise<LeaderboardEntry[]> {
+  let query: string;
+  let params: any[];
+  if (token && gameType) {
+    query = `SELECT * FROM betting_leaderboard WHERE token = $2 AND game_type = $3 ORDER BY total_volume DESC LIMIT $1`;
+    params = [limit, token, gameType];
+  } else if (token) {
+    query = `SELECT * FROM betting_leaderboard WHERE token = $2 ORDER BY total_volume DESC LIMIT $1`;
+    params = [limit, token];
+  } else if (gameType) {
+    query = `SELECT * FROM betting_leaderboard WHERE game_type = $2 ORDER BY total_volume DESC LIMIT $1`;
+    params = [limit, gameType];
+  } else {
+    query = `SELECT * FROM betting_leaderboard ORDER BY total_volume DESC LIMIT $1`;
+    params = [limit];
+  }
+  const rows = await dbQuery<any>(query, params);
 
   return rows.map((r: any) => ({
     bettorAddress: r.bettor_address,
@@ -899,17 +996,17 @@ export async function getAgentWallet(agentName: string, apiKey: string): Promise
 
 // ── Internal helpers ───────────────────────────────────────────────────
 
-async function updateLeaderboard(bettorAddress: string, bettorName: string | null, amountWei: string, token: Token) {
+async function updateLeaderboard(bettorAddress: string, bettorName: string | null, amountWei: string, token: Token, gameType: 'snake' | 'shooter' = 'snake') {
   try {
     await dbQuery(
-      `INSERT INTO betting_leaderboard (bettor_address, token, bettor_name, total_volume, total_bets, last_bet_at)
-       VALUES ($1, $4, $2, $3, 1, NOW())
-       ON CONFLICT (bettor_address, token) DO UPDATE SET
+      `INSERT INTO betting_leaderboard (bettor_address, token, game_type, bettor_name, total_volume, total_bets, last_bet_at)
+       VALUES ($1, $4, $5, $2, $3, 1, NOW())
+       ON CONFLICT (bettor_address, token, game_type) DO UPDATE SET
          bettor_name = COALESCE($2, betting_leaderboard.bettor_name),
          total_volume = betting_leaderboard.total_volume + $3,
          total_bets = betting_leaderboard.total_bets + 1,
          last_bet_at = NOW()`,
-      [bettorAddress.toLowerCase(), bettorName, amountWei, token],
+      [bettorAddress.toLowerCase(), bettorName, amountWei, token, gameType],
     );
   } catch (err) {
     console.error('[betting/service] updateLeaderboard failed:', err);

@@ -165,6 +165,9 @@ export class ShooterEngine {
   // ── Match lifecycle ───────────────────────────────────────────────
 
   createMatch(matchId: string): ShooterMatch {
+    // Free previous physics world if it exists
+    this.world?.free();
+
     // Create fresh physics world
     this.world = new this.rapier.World({ x: 0, y: -9.81, z: 0 });
 
@@ -266,6 +269,7 @@ export class ShooterEngine {
     if (this.match) {
       this.match.phase = 'finished';
     }
+    this.activeBullets = [];
   }
 
   // ── Action queue ──────────────────────────────────────────────────
@@ -299,6 +303,7 @@ export class ShooterEngine {
     this.applyMovement();
 
     // 3. Step Rapier physics (bullets move here)
+    this.world.timestep = TICK_INTERVAL_MS / 1000;
     this.world.step();
 
     // 4. Process bullet collisions and remove hit/expired bullets
@@ -896,7 +901,6 @@ export class ShooterEngine {
     if (!canFire(player.weapon, player.ammo, player.lastShotTime, now)) return;
 
     player.angle = aimAngle;
-    this.moveIntents.set(player.id, { angle: aimAngle });
 
     player.lastShotTime = now;
     player.ammo = consumeAmmo(player.ammo);
@@ -1168,7 +1172,6 @@ export class ShooterEngine {
       const dist = Math.sqrt(dx * dx + dz * dz);
       const angleToVictim = (Math.atan2(dz, dx) * 180) / Math.PI;
       player.angle = angleToVictim;
-      this.moveIntents.set(player.id, { angle: angleToVictim });
 
       // Raycast to check line of sight (can't knife through walls)
       const rayY = this.getPlayerRayHeight(player.id);
@@ -1249,7 +1252,7 @@ export class ShooterEngine {
   private handlePlayerDeath(player: ShooterPlayer): void {
     const droppedType = dropWeapon(player);
     if (droppedType) {
-      this.addPickup(droppedType);
+      this.addPickup(droppedType, player.x, player.y, player.z);
     }
 
     // Move Rapier body far away (will be repositioned on respawn)

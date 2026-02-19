@@ -43,17 +43,18 @@ export async function getHighestMatchId(): Promise<number> {
   }
 }
 
-/** Next shooter match id: shooter_match_1, shooter_match_2, ... */
+/** Next shooter match id: shooter_1, shooter_2, ... */
 export async function getHighestShooterMatchId(): Promise<number> {
   try {
+    // Extract trailing digits (POSIX [0-9]+); \d not portable in PG regex
     const rows = await dbQuery<{ max_id: string }>(
       `
-      SELECT COALESCE(MAX(CAST(SUBSTRING(id FROM 'shooter_match_(\\d+)') AS INTEGER)), 0) AS max_id
+      SELECT COALESCE(MAX(CAST(SUBSTRING(id FROM '[0-9]+$') AS INTEGER)), 0)::text AS max_id
       FROM matches
-      WHERE id LIKE 'shooter_match_%';
+      WHERE id LIKE 'shooter_%' AND id ~ '^shooter_[0-9]+$';
     `,
     );
-    if (rows.length > 0 && rows[0].max_id) {
+    if (rows.length > 0 && rows[0].max_id != null && rows[0].max_id !== '') {
       return parseInt(rows[0].max_id, 10);
     }
     return 0;
@@ -94,8 +95,8 @@ export async function recordAgentJoin(opts: {
 
     await dbQuery(
       `
-      INSERT INTO agents (name, api_key)
-      VALUES ($1, $2)
+      INSERT INTO agents (name, api_key, strategy_tag)
+      VALUES ($1, $2, $3)
       ON CONFLICT (name) DO UPDATE
       SET api_key = EXCLUDED.api_key,
           strategy_tag = COALESCE(EXCLUDED.strategy_tag, agents.strategy_tag);
@@ -126,15 +127,30 @@ export async function recordMatchEnd(opts: {
   winnerAgentName: string | null;
   endedAt: number;
   /** Use agent_name (canonical) so match_players rows are updated correctly. */
-  finalScores: { agentName: string; score: number; kills: number }[];
+  finalScores: { agentName: string; score: number; kills: number; deaths?: number }[];
   /** Optional: snake | shooter for matches table game_type. */
   gameType?: 'snake' | 'shooter';
 }) {
+  if (!pool) {
+    console.warn('[db] DATABASE_URL not set, skipping recordMatchEnd');
+    return;
+  }
+  const client = await pool.connect();
   try {
-    // Ensure the match row exists before recording the final result
-    await ensureMatchExists(opts.matchId, opts.gameType ?? 'snake');
+    await client.query('BEGIN');
 
-    await dbQuery(
+    // Ensure the match row exists before recording the final result
+    const gameType = opts.gameType ?? 'snake';
+    await client.query(
+      `
+      INSERT INTO matches (id, winner_name, game_type)
+      VALUES ($1, NULL, $2)
+      ON CONFLICT (id) DO UPDATE SET game_type = COALESCE(EXCLUDED.game_type, matches.game_type);
+    `,
+      [opts.matchId, gameType],
+    );
+
+    await client.query(
       `
       INSERT INTO matches (id, winner_name, ended_at, game_type)
       VALUES ($1, $2, to_timestamp($3 / 1000.0), $4)
@@ -143,23 +159,30 @@ export async function recordMatchEnd(opts: {
           ended_at    = EXCLUDED.ended_at,
           game_type   = COALESCE(EXCLUDED.game_type, matches.game_type);
     `,
-      [opts.matchId, opts.winnerAgentName, opts.endedAt, opts.gameType ?? 'snake'],
+      [opts.matchId, opts.winnerAgentName, opts.endedAt, gameType],
     );
 
     for (const row of opts.finalScores) {
-      await dbQuery(
+      const deaths = row.deaths ?? 0;
+      await client.query(
         `
-        INSERT INTO match_players (match_id, agent_name, score, kills)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO match_players (match_id, agent_name, score, kills, deaths)
+        VALUES ($1, $2, $3, $4, $5)
         ON CONFLICT (match_id, agent_name) DO UPDATE
         SET score = EXCLUDED.score,
-            kills = EXCLUDED.kills;
+            kills = EXCLUDED.kills,
+            deaths = EXCLUDED.deaths;
       `,
-        [opts.matchId, row.agentName, row.score, row.kills],
+        [opts.matchId, row.agentName, row.score, row.kills, deaths],
       );
     }
+
+    await client.query('COMMIT');
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error('[db] recordMatchEnd failed:', err);
+  } finally {
+    client.release();
   }
 }
 
@@ -204,6 +227,7 @@ export async function getGlobalLeaderboard(opts?: { game?: 'snake' | 'shooter' }
     let leaderboard: GlobalLeaderboardRow[] = [];
 
     // First try the extended query that includes strategy_tag.
+    // For game filter: match by game_type and also by match id pattern so we include rows where game_type was null (e.g. older data).
     try {
       const rowsWithTag = await dbQuery<{
         agent_name: string;
@@ -211,14 +235,38 @@ export async function getGlobalLeaderboard(opts?: { game?: 'snake' | 'shooter' }
         wins: string;
         strategy_tag: string | null;
       }>(
-        `
+        gameFilter === 'shooter'
+          ? `
         SELECT
           mp.agent_name,
           COUNT(DISTINCT mp.match_id)::text AS matches_played,
           COALESCE(SUM(CASE WHEN m.winner_name = mp.agent_name THEN 1 ELSE 0 END), 0)::text AS wins,
           MAX(mp.strategy_tag) AS strategy_tag
         FROM match_players mp
-        JOIN matches m ON m.id = mp.match_id${gameFilter ? ' AND m.game_type = $1' : ''}
+        JOIN matches m ON m.id = mp.match_id AND (m.game_type = $1 OR (m.game_type IS NULL AND m.id LIKE 'shooter_%'))
+        GROUP BY mp.agent_name
+        HAVING COUNT(DISTINCT mp.match_id) > 0;
+      `
+          : gameFilter === 'snake'
+            ? `
+        SELECT
+          mp.agent_name,
+          COUNT(DISTINCT mp.match_id)::text AS matches_played,
+          COALESCE(SUM(CASE WHEN m.winner_name = mp.agent_name THEN 1 ELSE 0 END), 0)::text AS wins,
+          MAX(mp.strategy_tag) AS strategy_tag
+        FROM match_players mp
+        JOIN matches m ON m.id = mp.match_id AND (m.game_type = $1 OR (m.game_type IS NULL AND m.id LIKE 'match_%'))
+        GROUP BY mp.agent_name
+        HAVING COUNT(DISTINCT mp.match_id) > 0;
+      `
+            : `
+        SELECT
+          mp.agent_name,
+          COUNT(DISTINCT mp.match_id)::text AS matches_played,
+          COALESCE(SUM(CASE WHEN m.winner_name = mp.agent_name THEN 1 ELSE 0 END), 0)::text AS wins,
+          MAX(mp.strategy_tag) AS strategy_tag
+        FROM match_players mp
+        JOIN matches m ON m.id = mp.match_id
         GROUP BY mp.agent_name
         HAVING COUNT(DISTINCT mp.match_id) > 0;
       `,
@@ -245,13 +293,35 @@ export async function getGlobalLeaderboard(opts?: { game?: 'snake' | 'shooter' }
         matches_played: string;
         wins: string;
       }>(
-        `
+        gameFilter === 'shooter'
+          ? `
         SELECT
           mp.agent_name,
           COUNT(DISTINCT mp.match_id)::text AS matches_played,
           COALESCE(SUM(CASE WHEN m.winner_name = mp.agent_name THEN 1 ELSE 0 END), 0)::text AS wins
         FROM match_players mp
-        JOIN matches m ON m.id = mp.match_id${gameFilter ? ' AND m.game_type = $1' : ''}
+        JOIN matches m ON m.id = mp.match_id AND (m.game_type = $1 OR (m.game_type IS NULL AND m.id LIKE 'shooter_%'))
+        GROUP BY mp.agent_name
+        HAVING COUNT(DISTINCT mp.match_id) > 0;
+      `
+          : gameFilter === 'snake'
+            ? `
+        SELECT
+          mp.agent_name,
+          COUNT(DISTINCT mp.match_id)::text AS matches_played,
+          COALESCE(SUM(CASE WHEN m.winner_name = mp.agent_name THEN 1 ELSE 0 END), 0)::text AS wins
+        FROM match_players mp
+        JOIN matches m ON m.id = mp.match_id AND (m.game_type = $1 OR (m.game_type IS NULL AND m.id LIKE 'match_%'))
+        GROUP BY mp.agent_name
+        HAVING COUNT(DISTINCT mp.match_id) > 0;
+      `
+            : `
+        SELECT
+          mp.agent_name,
+          COUNT(DISTINCT mp.match_id)::text AS matches_played,
+          COALESCE(SUM(CASE WHEN m.winner_name = mp.agent_name THEN 1 ELSE 0 END), 0)::text AS wins
+        FROM match_players mp
+        JOIN matches m ON m.id = mp.match_id
         GROUP BY mp.agent_name
         HAVING COUNT(DISTINCT mp.match_id) > 0;
       `,

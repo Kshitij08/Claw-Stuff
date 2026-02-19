@@ -9,14 +9,22 @@ import { NodeIO } from '@gltf-transform/core';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import {
-  MAP_GLB_PRIMARY,
-  MAP_GLB_FALLBACK,
-  PLAY_AREA_SIZE,
-  MAP_BOUNDS,
-  PLAYER_COLLISION_RADIUS,
+  ARENA_SIZE,
+  ARENA_MIN_X,
+  ARENA_MAX_X,
+  ARENA_MIN_Z,
+  ARENA_MAX_Z,
+  PLAYER_CAPSULE_RADIUS,
   PLAYER_CAPSULE_HALF_HEIGHT,
-  TICK_MS,
-} from './constants.js';
+  TICK_INTERVAL_MS,
+} from '../../shared/shooter-constants.js';
+
+// Map paths relative to project root (physics loads GLB for colliders)
+const MAP_GLB_PRIMARY = 'public/claw-shooter/map4.glb';
+const MAP_GLB_FALLBACK = 'public/claw-shooter/map.glb';
+const PLAY_AREA_SIZE = ARENA_SIZE;
+const MAP_BOUNDS = { minX: ARENA_MIN_X, maxX: ARENA_MAX_X, minZ: ARENA_MIN_Z, maxZ: ARENA_MAX_Z };
+const PLAYER_COLLISION_RADIUS = PLAYER_CAPSULE_RADIUS;
 
 export interface BuildingBBox {
   minX: number;
@@ -400,7 +408,7 @@ export class ShooterPhysics {
   /** Step the physics simulation by one tick */
   stepWorld(): void {
     if (!this.world) return;
-    this.world.timestep = TICK_MS / 1000;
+    this.world.timestep = TICK_INTERVAL_MS / 1000;
     this.world.step();
   }
 

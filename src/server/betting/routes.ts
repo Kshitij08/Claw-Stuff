@@ -58,7 +58,8 @@ export function createBettingRoutes(): Router {
   router.get('/status/:matchId', async (req: Request, res: Response) => {
     try {
       const token = req.query.token === 'MCLAW' ? 'MCLAW' : 'MON';
-      const status = await bettingService.getBettingStatus(req.params.matchId, token);
+      const gameType = req.params.matchId.startsWith('shooter_') ? 'shooter' : 'snake';
+      const status = await bettingService.getBettingStatus(req.params.matchId, token, gameType);
       res.json(status);
     } catch (err) {
       console.error('[betting/routes] /status failed:', err);
@@ -228,11 +229,12 @@ export function createBettingRoutes(): Router {
     }
     try {
       const matchId = typeof req.query.matchId === 'string' ? req.query.matchId : undefined;
+      const gameType = req.query.game === 'shooter' ? 'shooter' : req.query.game === 'snake' ? 'snake' : undefined;
       const [betsMON, betsMCLAW, statsMON, statsMCLAW] = await Promise.all([
-        bettingService.getUserBets(address, matchId, 'MON'),
-        bettingService.getUserBets(address, matchId, 'MCLAW'),
-        bettingService.getWalletStats(address, 'MON'),
-        bettingService.getWalletStats(address, 'MCLAW'),
+        bettingService.getUserBets(address, matchId, 'MON', gameType),
+        bettingService.getUserBets(address, matchId, 'MCLAW', gameType),
+        bettingService.getWalletStats(address, 'MON', gameType),
+        bettingService.getWalletStats(address, 'MCLAW', gameType),
       ]);
       res.json({
         betsByToken: { MON: betsMON, MCLAW: betsMCLAW },
@@ -246,9 +248,10 @@ export function createBettingRoutes(): Router {
 
   // ── GET /api/betting/global-stats ─────────────────────────────────────
   // No auth. Total wagered across all matches, per token (for home page).
-  router.get('/global-stats', async (_req: Request, res: Response) => {
+  router.get('/global-stats', async (req: Request, res: Response) => {
     try {
-      const stats = await bettingService.getGlobalWagerTotals();
+      const gameType = req.query.game === 'shooter' ? 'shooter' : req.query.game === 'snake' ? 'snake' : undefined;
+      const stats = await bettingService.getGlobalWagerTotals(gameType);
       res.json(stats);
     } catch (err) {
       console.error('[betting/routes] /global-stats failed:', err);
@@ -261,7 +264,8 @@ export function createBettingRoutes(): Router {
   router.get('/leaderboard', async (req: Request, res: Response) => {
     try {
       const token = req.query.token === 'MCLAW' ? 'MCLAW' : 'MON';
-      const leaderboard = await bettingService.getLeaderboard(undefined, token);
+      const gameType = req.query.game === 'shooter' ? 'shooter' : req.query.game === 'snake' ? 'snake' : undefined;
+      const leaderboard = await bettingService.getLeaderboard(undefined, token, gameType);
       res.json({ leaderboard });
     } catch (err) {
       console.error('[betting/routes] /leaderboard failed:', err);

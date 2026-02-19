@@ -7,7 +7,13 @@
  *   Or: npm run shooter-bots
  */
 
-import { runShooterAgent } from './shooter-agent-logic.js';
+import { runShooterAgent, PERSONALITIES } from './shooter-agent-logic.js';
+
+const PERSONALITY_ORDER = [
+  PERSONALITIES.BERSERKER,
+  PERSONALITIES.PREDATOR,
+  PERSONALITIES.TACTICIAN,
+];
 
 const BASE_URL = process.env.SHOOTER_BOTS_BASE_URL || process.env.BASE_URL || 'http://localhost:3000';
 const BOT_COUNT = parseInt(process.env.SHOOTER_BOT_COUNT || '3', 10);
@@ -83,7 +89,7 @@ async function main() {
       // Stagger joins slightly to avoid race with the 5s lobby countdown
       const runners = agents.map((agent, i) =>
         new Promise((resolve) => setTimeout(resolve, i * 300)).then(() =>
-          runShooterAgent(agent, BASE_URL, { quiet: QUIET })
+          runShooterAgent(agent, PERSONALITY_ORDER[i % PERSONALITY_ORDER.length], BASE_URL, { quiet: QUIET })
         )
       );
       await Promise.all(runners);

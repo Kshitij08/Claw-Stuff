@@ -100,6 +100,7 @@ export class GameEngine {
     }
     if (this.match) {
       this.match.actualEndTime = Date.now();
+      this.match.endTick = this.match.tick;
       this.match.phase = 'finished';
       this.determineWinner();
       if (this.onMatchEndCallback) {
@@ -136,15 +137,25 @@ export class GameEngine {
       moveSnake(snake);
       const head = getSnakeHead(snake);
 
-      // Wrap at walls (classic snake: appear on opposite side)
+      // Wrap at walls (classic snake: head and full body wrap to opposite side)
       if (checkWallCollision(head)) {
+        const oldX = head.x;
+        const oldY = head.y;
         wrapPointInArena(head);
+        const dx = head.x - oldX;
+        const dy = head.y - oldY;
+        for (let i = 1; i < snake.segments.length; i++) {
+          snake.segments[i].x += dx;
+          snake.segments[i].y += dy;
+        }
       }
 
       // Check collision with other snakes' bodies
       const collision = findCollisionTarget(head, this.match.snakes, playerId);
       if (collision) {
         killSnake(snake, collision.snakeId, this.match.tick);
+        const killerSnake = this.match.snakes.get(collision.snakeId);
+        if (killerSnake) killerSnake.kills++;
         this.dropSnakeAsFood(snake);
         continue;
       }
@@ -177,9 +188,11 @@ export class GameEngine {
           const len2 = snake2.segments.length;
 
           if (len1 === len2) {
-            // Tie: both die
+            // Tie: both die — each gets credit for the kill
             killSnake(snake1, snake2.id, this.match.tick);
             killSnake(snake2, snake1.id, this.match.tick);
+            snake1.kills++;
+            snake2.kills++;
             this.dropSnakeAsFood(snake1);
             this.dropSnakeAsFood(snake2);
           } else {
@@ -187,6 +200,7 @@ export class GameEngine {
             const winner = len1 > len2 ? snake1 : snake2;
             const loser = winner === snake1 ? snake2 : snake1;
             killSnake(loser, winner.id, this.match.tick);
+            winner.kills++;
             this.dropSnakeAsFood(loser);
           }
         }
@@ -232,11 +246,11 @@ export class GameEngine {
     const totalScore = Math.max(0, snake.score);
 
     if (totalScore > 0 && snake.segments.length > 0) {
-      // Each dropped food has DROPPED_FOOD_VALUE points.
-      // Drop roughly totalScore / DROPPED_FOOD_VALUE pellets, capped to segments count * 2
+      // Each dropped food has DROPPED_FOOD_VALUE points. Drop only what the snake's score justifies.
       const pelletsFromScore = Math.floor(totalScore / DROPPED_FOOD_VALUE);
       const maxPellets = snake.segments.length * 2;
-      const pellets = Math.max(5, Math.min(pelletsFromScore, maxPellets));
+      let pellets = Math.min(pelletsFromScore, maxPellets);
+      if (pellets < 1) pellets = 1; // at least one pellet when snake had score
 
       for (let i = 0; i < pellets; i++) {
         const idx = Math.floor(Math.random() * snake.segments.length);
@@ -285,7 +299,7 @@ export class GameEngine {
       snakes: Array.from(match.snakes.values()).map(snake => {
         const parts = resolveSkinToParts(snake.skinId);
         const survivalMs = snake.alive
-          ? match.tick * TICK_INTERVAL
+          ? (match.endTick ?? match.tick) * TICK_INTERVAL
           : (snake.deathTick ?? 0) * TICK_INTERVAL;
         return {
           id: snake.id,

@@ -463,13 +463,13 @@ function updateUI() {
     const rankBg = index === 0 ? 'bg-[#facc15] text-black' : 'bg-slate-700 text-white';
     const survival = formatSurvivalMs(snake.survivalMs);
     return `
-      <div class="flex items-center justify-between text-xs bg-slate-800 p-2 border-2 border-white shadow-[2px_2px_0_black] mb-2 transition-all ${opacity}">
+      <div class="flex items-center justify-between text-sm bg-slate-800 p-2 border-2 border-white shadow-[2px_2px_0_black] mb-2 transition-all ${opacity}">
         <div class="flex items-center gap-3">
-          <span class="${rankBg} w-6 h-6 flex items-center justify-center font-black text-[10px] border border-white">${index + 1}</span>
+          <span class="${rankBg} w-6 h-6 flex items-center justify-center font-black text-xs border border-white">${index + 1}</span>
           <div class="w-3 h-3 rounded-full border border-white" style="background: ${snake.color}"></div>
-          <span class="text-white font-bold uppercase text-xs">${escapeHtml(snake.name)}</span>
+          <span class="text-white font-bold uppercase text-sm">${escapeHtml(snake.name)}</span>
         </div>
-        <span class="font-black text-black bg-[#a3e635] px-2 py-0.5 border border-white text-[10px]">${survival}</span>
+        <span class="font-black text-black bg-[#a3e635] px-2 py-0.5 border border-white text-xs">${survival}</span>
       </div>
     `;
   }).join('');
@@ -756,7 +756,7 @@ render();
 // Global leaderboard polling
 async function fetchGlobalLeaderboard() {
   try {
-    const res = await fetch('/api/global-leaderboard');
+    const res = await fetch('/api/global-leaderboard?game=snake');
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}`);
     }
@@ -786,16 +786,16 @@ async function fetchGlobalLeaderboard() {
         .map((row, index) => {
           const winRatePct = (row.winRate * 100).toFixed(1);
           const rankBg = index === 0 ? 'bg-[#facc15] text-black' : 'bg-slate-600 text-white';
-          const tag = row.strategyTag ? ` — <span class="text-[10px] uppercase text-lime-300">${escapeHtml(row.strategyTag)}</span>` : '';
+          const tag = row.strategyTag ? ` — <span class="text-xs uppercase text-lime-300">${escapeHtml(row.strategyTag)}</span>` : '';
           return `
-            <div class="flex items-center justify-between text-xs bg-slate-800 p-2 border-2 border-white shadow-[2px_2px_0_black] mb-2">
+            <div class="flex items-center justify-between text-sm bg-slate-800 p-2 border-2 border-white shadow-[2px_2px_0_black] mb-2">
               <div class="flex items-center gap-2">
-                <span class="${rankBg} w-5 h-5 flex items-center justify-center font-black text-[10px] border border-white">${index + 1}</span>
+                <span class="${rankBg} w-5 h-5 flex items-center justify-center font-black text-xs border border-white">${index + 1}</span>
                 <div class="flex flex-col">
-                  <span class="text-white font-bold">${escapeHtml(row.agentName)}${tag}</span>
+                  <span class="text-white font-bold text-sm">${escapeHtml(row.agentName)}${tag}</span>
                 </div>
               </div>
-              <span class="font-bold bg-white text-black px-2 py-0.5 text-[10px]">${row.wins}/${row.matches} (${winRatePct}%)</span>
+              <span class="font-bold bg-white text-black px-2 py-0.5 text-xs">${row.wins}/${row.matches} (${winRatePct}%)</span>
             </div>
           `;
         })

@@ -148,12 +148,7 @@ export const Leaderboard = () => {
                     ))}
                   </tbody>
                 </table>
-                <button
-                  className="mt-4 w-full btn-neo btn-cyan"
-                  onClick={() => window.location.reload()}
-                >
-                  Watch Again
-                </button>
+
               </div>
             </div>
           </div>

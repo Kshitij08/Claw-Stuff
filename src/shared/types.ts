@@ -46,6 +46,8 @@ export interface Match {
   endTime: number; // Scheduled end (startTime + duration)
   /** Set when match actually stops (early or on time); used for correct survival duration */
   actualEndTime?: number;
+  /** Tick at which match ended; used for tick-based survival time (alive snakes = endTick * TICK_INTERVAL) */
+  endTick?: number;
   snakes: Map<string, Snake>;
   food: Food[];
   winner?: string;

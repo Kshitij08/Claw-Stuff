@@ -39,8 +39,9 @@ body {
   left: 0;
 }
 
-/* Game view: three-column layout */
+/* Game view: three-column layout; +50% font scale for readability */
 .game-view {
+  font-size: 150%;
   width: 100%;
   min-height: 100vh;
   display: flex;

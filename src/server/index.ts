@@ -104,7 +104,6 @@ const shooterMatchManager = new ShooterMatchManager();
 
 // API routes — Snake game
 app.use('/api', createRoutes(matchManager));
-app.use('/api/shooter', createShooterRoutes(shooterMatchManager));
 app.use('/api/betting', createBettingRoutes());
 app.use('/api', createNftRoutes());
 
@@ -139,7 +138,7 @@ io.on('connection', (socket) => {
   // Send current shooter state if match is active (spectator view)
   const shooterState = shooterMatchManager.getSpectatorState();
   if (shooterState) {
-    socket.emit('shooterGameState', shooterState);
+    socket.emit('shooterState', shooterState);
   }
 
   // Send server status
@@ -317,9 +316,6 @@ httpServer.listen(PORT, () => {
     console.error('Failed to start snake match manager:', err);
   });
 
-  shooterMatchManager.start().catch((err) => {
-    console.error('Failed to start shooter match manager:', err);
-  });
   shooterMatchManager.start().catch((err) => {
     console.error('Failed to start shooter match manager:', err);
   });

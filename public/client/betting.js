@@ -632,14 +632,15 @@ window.placeBetOnAgent = async function placeBetOnAgent(agentName, inputIndex) {
    Claim Winnings
    ================================================================ */
 window.claimWinnings = async function claimWinnings() {
-  if (!walletAddress || !bettingContract || !currentMatchId) {
+  const claimMatchId = lastResolvedMatchId || currentMatchId;
+  if (!walletAddress || !bettingContract || !claimMatchId) {
     showToast('Connect wallet first', 'error');
     return;
   }
 
   try {
     showToast('Claiming winnings...', 'info');
-    const matchIdB32 = ethers.encodeBytes32String(currentMatchId.length > 31 ? currentMatchId.slice(0, 31) : currentMatchId);
+    const matchIdB32 = ethers.encodeBytes32String(claimMatchId.length > 31 ? claimMatchId.slice(0, 31) : claimMatchId);
     const tx = await bettingContract.claim(matchIdB32);
     const receipt = await tx.wait();
     showToast('Winnings claimed successfully!', 'success');
@@ -668,7 +669,7 @@ async function fetchMyBets(matchId) {
 
   try {
     // Fetch bets and stats for BOTH tokens so we always show the correct token's data
-    const res = await fetch(`/api/betting/bets-by-wallet/${walletAddress}`);
+    const res = await fetch(`/api/betting/bets-by-wallet/${walletAddress}?game=snake`);
     const data = await res.json();
     const betsByToken = data.betsByToken || { MON: [], MCLAW: [] };
     const statsByToken = data.statsByToken || { MON: null, MCLAW: null };
@@ -756,7 +757,7 @@ async function fetchLeaderboard() {
   if (!container) return;
 
   try {
-    const res = await fetch(`/api/betting/leaderboard?token=${encodeURIComponent(currentBetToken)}`);
+    const res = await fetch(`/api/betting/leaderboard?token=${encodeURIComponent(currentBetToken)}&game=snake`);
     const data = await res.json();
     const leaders = data.leaderboard || [];
 
@@ -865,6 +866,7 @@ function initBettingSocket() {
           bettorCount: 0,
         };
         currentBettingStatus = placeholder;
+        window.currentBettingStatus = placeholder;
         renderBettingUI(placeholder);
       }
       setTimeout(() => fetchBettingStatus(data.matchId), 500);

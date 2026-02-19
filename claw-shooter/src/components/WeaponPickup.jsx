@@ -39,15 +39,13 @@ const PICKUP_VISUAL_SCALE = PICKUP_SCALE * 1.5;
 const PICKUP_HEIGHT = 0.3;
 
 export function WeaponPickup({ id, weaponType, position, taken }) {
-  if (taken) return null;
-
   const modelPath = WEAPON_MODEL[weaponType];
-  if (!modelPath) return null;
+  const fallbackPath = WEAPON_MODEL.pistol;
 
   const color = WEAPON_COLORS[weaponType] ?? 0xffff00;
   const label = LABELS[weaponType] || weaponType;
 
-  const gltf = useGLTF(modelPath);
+  const gltf = useGLTF(modelPath || fallbackPath);
   const sceneClone = useMemo(() => gltf.scene.clone(true), [gltf.scene]);
   const coneRef = useRef(null);
 
@@ -67,6 +65,8 @@ export function WeaponPickup({ id, weaponType, position, taken }) {
       }
     });
   }, [sceneClone]);
+
+  if (taken || !modelPath) return null;
 
   const px = position?.x ?? 0;
   const py = position?.y ?? 0;

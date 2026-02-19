@@ -1,6 +1,6 @@
 import { RigidBody, vec3 } from "@react-three/rapier";
-import { useEffect, useRef } from "react";
-import { MeshBasicMaterial } from "three";
+import { useEffect, useMemo, useRef } from "react";
+import { MeshBasicMaterial, Color } from "three";
 import { isHost } from "playroomkit";
 import { WEAPON_OFFSET } from "./CharacterController";
 import { WEAPON_STATS, WEAPON_TYPES } from "../constants/weapons";
@@ -18,26 +18,35 @@ export const Bullet = ({
   const rigidbody = useRef();
   const stats = WEAPON_STATS[weaponType] || DEFAULT_STATS;
   const { gamePhase } = useGameManager();
-  if (stats.isMelee) return null;
 
   const speed = stats.speed ?? 20;
   const damage = stats.damage ?? 10;
   const color = stats.color ?? 0xffff00;
   const size = weaponType === "smg" ? [0.03, 0.03, 0.35] : [0.05, 0.05, 0.5];
 
-  const material = useRef(
-    new MeshBasicMaterial({
-      color,
+  const boostedColor = useMemo(() => {
+    const c = new Color();
+    c.setHex(color);
+    c.multiplyScalar(42);
+    return c;
+  }, [color]);
+
+  const material = useRef(null);
+  if (!material.current) {
+    material.current = new MeshBasicMaterial({
+      color: boostedColor,
       toneMapped: false,
-    })
-  );
-  material.current.color.setHex(color);
-  material.current.color.multiplyScalar(42);
+    });
+  }
+
+  useEffect(() => {
+    material.current.color.copy(boostedColor);
+  }, [boostedColor]);
 
   useEffect(() => {
     if (gamePhase === "playing") {
       try {
-        const audio = new Audio("/sounds/pistol.mp3");
+        const audio = new Audio("/claw-shooter/sounds/pistol.mp3");
         audio.volume = 0.08;
         audio.play();
       } catch (_) {}
@@ -50,6 +59,8 @@ export const Bullet = ({
     };
     if (rigidbody.current) rigidbody.current.setLinvel(velocity, true);
   }, []);
+
+  if (stats.isMelee) return null;
 
   return (
     <group position={[position.x, position.y, position.z]} rotation-y={angle}>

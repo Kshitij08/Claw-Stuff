@@ -63,6 +63,12 @@ async function main() {
         ADD COLUMN IF NOT EXISTS strategy_tag TEXT;
     `);
 
+    // Deaths (shooter game KDA; snake can leave 0)
+    await client.query(`
+      ALTER TABLE match_players
+        ADD COLUMN IF NOT EXISTS deaths INTEGER NOT NULL DEFAULT 0;
+    `);
+
     // Agent skins table: tracks which skins each agent owns
     await client.query(`
       CREATE TABLE IF NOT EXISTS agent_skins (
@@ -180,24 +186,36 @@ async function main() {
       ALTER TABLE betting_leaderboard
         ADD COLUMN IF NOT EXISTS token TEXT NOT NULL DEFAULT 'MON';
     `);
-    // Adjust primary key to include token (safe if already set this way)
+
+    // game_type on betting tables (must be added BEFORE changing betting_leaderboard PK to include game_type)
     await client.query(`
-      DO $$
-      BEGIN
-        IF EXISTS (
-          SELECT 1
-          FROM   information_schema.table_constraints
-          WHERE  table_name = 'betting_leaderboard'
-          AND    constraint_type = 'PRIMARY KEY'
-          AND    constraint_name = 'betting_leaderboard_pkey'
-        ) THEN
-          ALTER TABLE betting_leaderboard DROP CONSTRAINT betting_leaderboard_pkey;
-        END IF;
-      END$$;
+      ALTER TABLE betting_pools
+        ADD COLUMN IF NOT EXISTS game_type TEXT NOT NULL DEFAULT 'snake';
+    `);
+    await client.query(`
+      ALTER TABLE bet_settlements
+        ADD COLUMN IF NOT EXISTS game_type TEXT NOT NULL DEFAULT 'snake';
     `);
     await client.query(`
       ALTER TABLE betting_leaderboard
-        ADD CONSTRAINT betting_leaderboard_pkey PRIMARY KEY (bettor_address, token);
+        ADD COLUMN IF NOT EXISTS game_type TEXT NOT NULL DEFAULT 'snake';
+    `);
+
+    // Idempotent: ensure PK is (bettor_address, token, game_type). Drop existing PK then add only if none.
+    await client.query(`
+      ALTER TABLE betting_leaderboard DROP CONSTRAINT IF EXISTS betting_leaderboard_pkey;
+    `);
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conrelid = 'betting_leaderboard'::regclass AND contype = 'p'
+        ) THEN
+          ALTER TABLE betting_leaderboard
+            ADD CONSTRAINT betting_leaderboard_pkey PRIMARY KEY (bettor_address, token, game_type);
+        END IF;
+      END$$;
     `);
 
     // ── NFT challenge and mint tables (for agent free-mint flow) ─────────

@@ -54,6 +54,10 @@ function escapeSql(val: unknown): string {
   if (typeof val === 'boolean') return val ? 'true' : 'false';
   if (typeof val === 'number' && !Number.isNaN(val)) return String(val);
   if (val instanceof Date) return `'${val.toISOString()}'`;
+  if (Array.isArray(val)) {
+    const inner = val.map((v) => String(v).replace(/'/g, "''")).join(',');
+    return `'{${inner}}'`;
+  }
   const s = String(val);
   return "'" + s.replace(/'/g, "''") + "'";
 }
@@ -69,20 +73,18 @@ async function backupWithNode(): Promise<Buffer> {
   ];
 
   try {
-    // Ensure every agent has the default skin so restored backups are self-consistent
-    await client.query(`
-      INSERT INTO agent_skins (agent_name, skin_id)
-      SELECT a.name, 'default'
-      FROM agents a
-      LEFT JOIN agent_skins s ON s.agent_name = a.name AND s.skin_id = 'default'
-      WHERE s.agent_name IS NULL
-      ON CONFLICT (agent_name, skin_id) DO NOTHING;
-    `);
-
-    const tablesRes = await client.query<{ tablename: string }>(
-      `SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename`
-    );
-    const tables = tablesRes.rows.map((r) => r.tablename);
+    const tables = [
+      'agents',
+      'matches',
+      'agent_skins',
+      'match_players',
+      'betting_pools',
+      'bets',
+      'bet_settlements',
+      'betting_leaderboard',
+      'nft_challenges',
+      'nft_mints',
+    ];
 
     for (const table of tables) {
       const colsRes = await client.query<{ column_name: string }>(

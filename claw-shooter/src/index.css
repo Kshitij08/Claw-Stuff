@@ -22,24 +22,47 @@ body {
   margin: 0;
   padding: 0;
   width: 100%;
-  height: 100%;
-  overflow: hidden;
+  min-height: 100%;
   background: var(--neo-bg);
   font-family: "Outfit", sans-serif;
   color: white;
 }
 
-#root {
-  width: 100%;
-  height: 100%;
-  min-height: 100vh;
-  overflow: auto;
-  position: fixed;
-  top: 0;
-  left: 0;
+/* Mobile: document scrolls so stacked content moves properly. Desktop: fixed root. */
+@media (max-width: 767px) {
+  html {
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+  body {
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+@media (min-width: 768px) {
+  html, body {
+    height: 100%;
+    overflow: hidden;
+  }
 }
 
-/* Game view: three-column layout; +50% font scale for readability */
+#root {
+  width: 100%;
+  min-height: 100vh;
+}
+@media (min-width: 768px) {
+  #root {
+    height: 100%;
+    overflow: auto;
+    position: fixed;
+    top: 0;
+    left: 0;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* Game view: stacked on mobile (scrollable page), row on desktop */
 .game-view {
   font-size: 150%;
   width: 100%;
@@ -48,6 +71,7 @@ body {
   flex-direction: column;
   gap: 1rem;
   padding: 0.75rem;
+  box-sizing: border-box;
   background-image:
     radial-gradient(circle, #334155 15%, transparent 15%),
     radial-gradient(circle, #334155 15%, transparent 15%);
@@ -59,6 +83,7 @@ body {
     flex-direction: row;
     padding: 1.25rem;
     height: 100vh;
+    min-height: 0;
     overflow: hidden;
   }
 }
@@ -66,7 +91,7 @@ body {
 .canvas-container {
   flex: 1;
   min-width: 0;
-  min-height: 50vh;
+  min-height: 280px;
   position: relative;
   order: 2;
   background: #0f172a;
